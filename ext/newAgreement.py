@@ -102,14 +102,14 @@ class Agreement(QDialog):
         self.checkBreaking.setTristate(False)
         self.checkBreaking.stateChanged.connect(self.toggleBreaking)
 
-        self.comboSupplier = ComboFocus.FocusCombo(self)
+        self.comboSupplier = APM.ComboFocus.FocusCombo(self)
         self.comboSupplier.setMaximumSize(220,30)
         self.comboSupplier.setEditable(True)
         self.comboSupplier.activated.connect(self.supplierChange)
         self.comboSupplier.focusLost.connect(self.supplierFocusLost)
         self.comboSupplier.doubleClicked.connect(self.editContact)
 
-        self.comboResponsible = ComboFocus.FocusCombo()
+        self.comboResponsible = APM.ComboFocus.FocusCombo()
         self.comboResponsible.setEditable(True)
         self.comboResponsible.setMaximumSize(200, 25)
         self.comboResponsible.setMinimumSize(200, 25)
@@ -360,7 +360,7 @@ class Agreement(QDialog):
             self.spinSaleFinalPercent.setValue(int)
 
 
-    @pyqtSlot(ComboFocus.FocusCombo)
+    @pyqtSlot(APM.FocusCombo)
     def supplierFocusLost(self, combo):
         try:
             self.setFocusPolicy(Qt.NoFocus)
@@ -387,7 +387,7 @@ class Agreement(QDialog):
         finally:
             self.setFocusPolicy(Qt.StrongFocus)
 
-    @pyqtSlot(ComboFocus.FocusCombo)
+    @pyqtSlot(APM.FocusCombo)
     def responsibleFocusLost(self, combo):
         try:
             self.setFocusPolicy(Qt.NoFocus)
