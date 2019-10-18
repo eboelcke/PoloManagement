@@ -1,37 +1,31 @@
 import sys
 import os
+import traceback
+from struct import Struct
 
 from PyQt5.QtCore import (QVariant, Qt, pyqtSlot, QItemSelectionModel, QDir,QSize,
                           QItemSelection, QModelIndex, QAbstractItemModel, QCoreApplication,
                           QPoint, QSettings, pyqtSlot, QAbstractTableModel)
 from PyQt5.QtGui import QColor
-from PyQt5.QtSql import (QSqlDatabase, QSqlQueryModel,QSqlQuery , QSqlTableModel, QSqlError,
-                         QSqlQueryModel, QSqlQuery)
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QTableView, QAction, QFileSystemModel,QFileDialog,
-            QWidget, QDockWidget, QAbstractItemView, QTreeView, QListView, QTextEdit, QFileDialog, QDialog,
-            QFontComboBox, QComboBox, QColorDialog, QMessageBox, QMenu,QHeaderView)
+from PyQt5.QtSql import (QSqlDatabase,QSqlQueryModel, QSqlQuery)
+#from PyQt5.QtSql import QSqlQueryModel,QSqlQuery , QSqlTableModel, QSqlError
+
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QTableView, QAction, QFileSystemModel,
+            QDockWidget, QAbstractItemView, QTreeView,  QTextEdit, QDialog,
+            QFontComboBox, QComboBox, QColorDialog, QMessageBox, QMenu, QFileDialog)
+from PyQt5.QtGui import (QFont, QIcon, QTextListFormat, QTextCharFormat,
+                         QTextCursor, QImage, QContextMenuEvent)
 from PyQt5.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
-import traceback
+
 from ext import Settings, pushdate, find, wordcount, table, newAgreement, APM
 from ext.APM import TableViewAndModel, DataError
-import MySQL_Connector
-from MySqlConnection import MyConnectionDialog
-import PoloResource
-
 from ext.Horses import Horses, StartHorse, Mortality, Reject, Sales
 from ext.HorseReports import AvailableHorses
-from ext.socketclient import RequestHandler
 from ext.CQSqlDatabase import Cdatabase
-from ext.HorseDetail import CheckHorse
 from ext.Contacts import Contacts, ShowContacts
 from ext.BrokeReceive import ReceiveBroken
+import PoloResource
 
-#from MainWindowUI import Ui_MainWindow
-from PyQt5.QtGui import (QPalette, QBrush, QFont, QActionEvent, QIcon, QTextListFormat, QTextCharFormat,
-                         QTextCursor, QImage, QContextMenuEvent)
-from FileDialog import FileDialog
-from TitleBar import CustomBar
-from struct import Struct
 
 class QConnectionError(Exception):
     pass
@@ -240,9 +234,6 @@ class MainWindow(QMainWindow):
         if not self.settings.value("windowState") == None:
             self.restoreState(self.settings.value("windowState"))
         self.setFont(fd)
-        leftDock = []
-        bottonDock = []
-        rightDock = []
 
         self.tabifyDockWidget(self.dockRejection, self.dockSales)
         self.tabifyDockWidget(self.dockRejection, self.dockMortality)
@@ -362,8 +353,13 @@ class MainWindow(QMainWindow):
 
         tableAction = QAction(QIcon("icons/table.png"), "Insert Table", self)
         tableAction.setStatusTip("Insert Table")
-        tableAction.setShortcut("Ctrñ+I")
+        tableAction.setShortcut("Ctrl+I")
         tableAction.triggered.connect(table.Table(self).show)
+
+        listAction = QAction("Insert List",self)
+        listAction.setStatusTip("Insert a horse list")
+        listAction.setShortcut("Ctrl + L")
+        listAction.triggered.connect(self.insertList)
 
         dateTimeAction = QAction(QIcon("icons/calender.png"),"Date and Time", self)
         dateTimeAction.setStatusTip("Insert Date and Time")
@@ -392,6 +388,7 @@ class MainWindow(QMainWindow):
         self.toolBar.addAction(imageAction)
         self.toolBar.addAction(wordCountAction)
         self.toolBar.addAction(tableAction)
+        self.toolBar.addAction(listAction)
         self.toolBar.addAction(dateTimeAction)
         self.addToolBarBreak()
 
@@ -513,7 +510,7 @@ class MainWindow(QMainWindow):
         self.horseBar = self.addToolBar('Horse Management')
         self.horseBar.setObjectName("Management")
 
-        self.startAction = QAction(QIcon(":/Icons8/Horses/icons8-equestrian-50.png"), "Start Horse", self)
+        self.startAction = QAction(QIcon(":Icons8/transport.png"), "Movements Horse", self)
         self.startAction.setStatusTip("Horse Starting Date")
         self.startAction.triggered.connect(self.startHorse)
 
@@ -716,21 +713,21 @@ class MainWindow(QMainWindow):
         file.addAction(self.closeAction)
         file.addAction(self.deleteAction)
         file.addSeparator()
-        file.addAction(self.previewAction)
-        file.addAction(self.printAction)
-        file.addSeparator()
         file.addAction(self.settingsAction)
         file.addAction(self.quitAction)
 
-        edit = menuBar.addMenu("Edit")
-        edit.addAction(selectAllAction)
-        edit.addAction(self.copyAction)
-        edit.addAction(self.cutAction)
-        edit.addAction(self.pasteAction)
-        edit.addAction(self.deleteAction)
-        edit.addAction(self.undoAction)
-        edit.addAction(self.redoAction)
-        edit.addAction(self.findAction)
+        document = menuBar.addMenu("Document")
+        document.addAction(selectAllAction)
+        document.addAction(self.copyAction)
+        document.addAction(self.cutAction)
+        document.addAction(self.pasteAction)
+        document.addAction(self.deleteAction)
+        document.addAction(self.undoAction)
+        document.addAction(self.redoAction)
+        document.addAction(self.findAction)
+        document.addSeparator()
+        document.addAction(self.previewAction)
+        document.addAction(self.printAction)
 
         view = menuBar.addMenu("View")
         view.addAction(toolBarAction)
@@ -1999,6 +1996,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "DataError", "{}".format(err.message), QMessageBox.Ok)
         except Exception as err:
             print(type(err).__name__, err.args)
+
+    @pyqtSlot()
+    def insertList(self):
+        pass
 
 
 def main():

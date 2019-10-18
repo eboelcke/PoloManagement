@@ -1,6 +1,6 @@
 import sys
 import os
-from PyQt5.QtWidgets import ( QDialog, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
+from PyQt5.QtWidgets import ( QDialog, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel, QLineEdit, QPlainTextEdit,
                              QPushButton, QTableView, QMessageBox, QCheckBox,
                               QHeaderView, QAbstractItemView)
 from PyQt5.QtCore import Qt, QSettings, pyqtSlot, QVariant
@@ -9,6 +9,7 @@ from PyQt5.QtSql import QSqlQuery, QSqlQueryModel, QSqlDriver
 from ext.socketclient import RequestHandler
 from ext import APM
 from ext.CQSqlDatabase import Cdatabase
+from ext.APM import QSqlAlignColorQueryModel, TableViewAndModel
 from configparser import ConfigParser
 
 class QSqlAlignQueryModel(QSqlQueryModel):
@@ -93,6 +94,23 @@ class Contacts(QDialog):
         self.lineName.setToolTip("Lastname, Firstname")
         self.lineName.editingFinished.connect(self.checkFullname)
 
+        lblAddress = QLabel('Address:')
+        self.textAddress = QPlainTextEdit()
+        self.textAddress.setToolTip("Contact Address")
+        self.textAddress.setTabStopWidth(33)
+
+        lblPhone = QLabel('Telephone')
+        self.linePhone = QLineEdit()
+        self.linePhone.setToolTip("Contact telephone")
+        self.linePhone.setMaximumWidth(250)
+        self.linePhone.editingFinished.connect(self.enableSave)
+
+        lblEmail = QLabel('Email')
+        self.lineEmail = QLineEdit()
+        self.lineEmail.setToolTip("Contact Email address")
+        self.lineEmail.setMaximumWidth(250)
+        self.lineEmail.editingFinished.connect(self.enableSave)
+
         self.checkPlayer = QCheckBox("Polo Seller")
         self.checkPlayer.setToolTip("Horse maker and seller")
         self.checkPlayer.stateChanged.connect(self.enableSave)
@@ -144,6 +162,14 @@ class Contacts(QDialog):
         hLayoutTop.addWidget(lblName)
         hLayoutTop.addWidget(self.lineName)
 
+        gLayoutAddress = QGridLayout()
+        gLayoutAddress.addWidget(lblAddress, 0, 0)
+        gLayoutAddress.addWidget(self.textAddress, 0, 1, 2, 2)
+        gLayoutAddress.addWidget(lblPhone, 0,3)
+        gLayoutAddress.addWidget(self.linePhone, 0, 4)
+        gLayoutAddress.addWidget(lblEmail,1,3)
+        gLayoutAddress.addWidget(self.lineEmail, 1,4)
+        #gLayoutAddress.addWidget(self.checkActive,2,2)
 
         hLayoutType = QHBoxLayout()
         hLayoutType.addSpacing(100)
@@ -164,15 +190,16 @@ class Contacts(QDialog):
         hLayoutBottom.addSpacing(100)
         hLayoutBottom.addWidget(self.checkResponsible)
         hLayoutBottom.addWidget(self.checkVeterinary)
+        hLayoutBottom.addWidget(self.checkActive)
 
         hLayoutButtons = QHBoxLayout()
+        hLayoutButtons.addSpacing(400)
         hLayoutButtons.addWidget(pushCancel)
-        hLayoutButtons.addSpacing(300)
-        hLayoutButtons.addWidget(self.checkActive)
         hLayoutButtons.addWidget(self.pushSave)
 
         vLayout = QVBoxLayout()
         vLayout.addLayout(hLayoutTop)
+        vLayout.addLayout(gLayoutAddress)
         vLayout.addLayout(hLayoutType)
         vLayout.addLayout(hLayoutActual)
         vLayout.addLayout(hLayoutSale)
@@ -181,45 +208,33 @@ class Contacts(QDialog):
         if self.mode == APM.OPEN_EDIT:
             try:
                 self.setMinimumWidth(850)
-                self.tableContacts = QTableView()
-                self.tableContacts.verticalHeader().setVisible(False)
-                self.modelContacts = QSqlAlignQueryModel()
+                colDict = {
+                    0: ("ID", True, True, True, None),
+                    1: ("Contact", False, False, False, None),
+                    2: ("Play", False, True, True, None),
+                    3: ("Break", False, True, True, None),
+                    4: ("Player", False, True, True, None),
+                    5: ("Buster", False, True, True, None),
+                    6: ("Checker", False, True, True, None),
+                    7: ("Buyer", False, True, True, None),
+                    8: ("Dealer", False, True, True, None),
+                    9: ("Veterinay", False, True, True, None),
+                    10: ("Active", True, True, True, None),
+                    11: ("Address", True, True, False, None),
+                    12: ("Telephone", True, True, False, None),
+                    13: ("EMail", True, True, False, None)}
+                colorDict = {
+                }
                 qry = self.getContactsQuery()
-                self.modelContacts.setQuery(qry)
-                self.modelContacts.setHeaderData(0,Qt.Horizontal,"ID")
-                self.modelContacts.setHeaderData(1, Qt.Horizontal, "Name")
-                self.modelContacts.setHeaderData(2, Qt.Horizontal, "Play")
-                self.modelContacts.setHeaderData(3, Qt.Horizontal, 'Break')
-                self.modelContacts.setHeaderData(4, Qt.Horizontal, 'Buster')
-                self.modelContacts.setHeaderData(5, Qt.Horizontal, 'Player')
-                self.modelContacts.setHeaderData(6, Qt.Horizontal, "Manager")
-                self.modelContacts.setHeaderData(7, Qt.Horizontal, 'Buyer')
-                self.modelContacts.setHeaderData(8, Qt.Horizontal, 'Dealer')
-                self.modelContacts.setHeaderData(9, Qt.Horizontal, 'Vet')
-                self.modelContacts.setHeaderData(10, Qt.Horizontal, 'Active')
-                self.tableContacts.setModel(self.modelContacts)
-                self.tableContacts.setSelectionMode(QAbstractItemView.SingleSelection)
-                self.tableContacts.setStyleSheet("QTableView {font-size: 8pt;}")
-                header = self.tableContacts.horizontalHeader()
-                header.setStyleSheet("QHeaderView {font-size: 8pt;}")
-                header.setSectionResizeMode(0,QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(1, QHeaderView.Stretch)
-                header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(9, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(10, QHeaderView.ResizeToContents)
-                self.tableContacts.setRowHeight(0, 10)
-                self.tableContacts.verticalHeader().setDefaultSectionSize(self.tableContacts.rowHeight(0))
-                self.tableContacts.setColumnWidth(0,50)
-                self.tableContacts.setColumnWidth(1, 100)
-                self.tableContacts.hideColumn(0)
-                self.tableContacts.clicked.connect(self.getContactData)
+                self.tableContacts = TableViewAndModel(colDict, colorDict,(500, 100),qry)
+                self.tableContacts.verticalHeader().setVisible(False)
+                self.tableContacts.doubleClicked.connect(self.getContactData)
+                hLayoutButtons.insertStretch(0,5)
                 vLayout.addWidget(self.tableContacts)
+            except APM.DataError as err:
+                print(type(err).__name__, err.args)
+                res = QMessageBox.warning(self, err.args[0],err.args[1])
+                sys.exit()
             except Exception as err:
                 print(type(err).__name__, err.args)
         elif self.mode == APM.OPEN_EDIT_ONE:
@@ -233,8 +248,8 @@ class Contacts(QDialog):
     @pyqtSlot()
     def getContactData(self):
         row = self.tableContacts.currentIndex().row()
-        self.modelContacts.query().seek(row)
-        record = self.modelContacts.query().record()
+        self.tableContacts.model().query().seek(row)
+        record = self.tableContacts.model().query().record()
         try:
             res = QMessageBox.question(self,"Edit Contact", "Do you want to edit {}´data.\n Check data and edit it "
                                             " as necessary".format(record.value(1)))
@@ -265,6 +280,9 @@ class Contacts(QDialog):
             self.checkVeterinary.setChecked(True if record.value(9) == u'\u2714' else False)
             self.checkActive.setChecked(True if record.value(10) == u'\u2714' else False)
             self.setWindowTitle("Edit Contact: '" + record.value(1) + "'")
+            self.textAddress.setPlainText(record.value(11))
+            self.linePhone.setText(record.value(12))
+            self.lineEmail.setText(record.value(13))
         except Exception as err:
             print(type(err).__name__, err.args)
 
@@ -282,7 +300,10 @@ class Contacts(QDialog):
             if(buyer = 1,_ucs2 X'2714', ''), 
             if(dealer = 1,_ucs2 X'2714', ''),
             if (veterinary = 1, _ucs2 x'2714', ''), 
-            if(active = 1, _ucs2 X'2714', '')
+            if(active = 1, _ucs2 X'2714', ''),
+            address,
+            telephone,
+            email
             FROM contacts
             ORDER BY fullname""")
         return qry
@@ -290,15 +311,19 @@ class Contacts(QDialog):
     @pyqtSlot()
     def enableSave(self):
         send_object = self.sender()
+        if isinstance(send_object, QPushButton):
+            return
         if self.mode == APM.OPEN_EDIT and self.contactid is None:
             QMessageBox.warning(self, "Wrong Mode", "Cannot save a new contact in the edit form!", )
             self.pushSave.setEnabled(False)
-            if send_object == self.lineName:
-                self.lineName.clear()
-            elif send_object == self.checkActive:
-                self.checkActive.setChecked(True)
-            else:
-                send_object.setChecked(False)
+            if isinstance(send_object, QLineEdit):
+                send_object.clear()
+                self.textAddress.clear()
+            elif isinstance(send_object, QCheckBox):
+                if send_object == self.checkActive:
+                    self.checkActive.setChecked(True)
+                else:
+                    send_object.setChecked(False)
             return
 
         if len(self.lineName.text()) > 0 :
@@ -368,6 +393,9 @@ class Contacts(QDialog):
             qry.prepare("""
             INSERT INTO contacts
             (fullname,
+            address,
+            telephone,
+            email,
             playerseller,
             horsebreaker,
             buyer,
@@ -377,11 +405,14 @@ class Contacts(QDialog):
             player,
             veterinary,
             active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""")
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""")
         else:
             qry.prepare("""
             UPDATE contacts 
-            SET fullname = ?, 
+            SET fullname = ?,
+            address = ?,
+            telephone = ?,
+            email = ?,
             playerseller = ?, 
             horsebreaker = ?, 
             buyer = ?, 
@@ -393,6 +424,9 @@ class Contacts(QDialog):
             active = ? 
             WHERE id = ?""")
         qry.addBindValue(QVariant(self.lineName.text()))
+        qry.addBindValue(QVariant(self.textAddress.toPlainText()))
+        qry.addBindValue(QVariant(self.linePhone.text()))
+        qry.addBindValue(QVariant(self.lineEmail.text()))
         qry.addBindValue(QVariant(self.checkPlayer.isChecked()))
         qry.addBindValue(QVariant(self.checkBreaker.isChecked()))
         qry.addBindValue(QVariant(self.checkBuyer.isChecked()))

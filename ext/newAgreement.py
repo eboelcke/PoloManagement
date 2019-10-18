@@ -1,16 +1,17 @@
 import sys
 from PyQt5.QtWidgets import (QDialog, QLabel, QLineEdit, QPushButton, QCheckBox, QTextEdit,
-                            QFormLayout, QHBoxLayout, QComboBox, QGridLayout, QCalendarWidget,
+                             QHBoxLayout, QGridLayout, QCalendarWidget,
                              QDateEdit, QApplication, QVBoxLayout, QGroupBox, QRadioButton, QSpinBox,
-                             QFormLayout, QMessageBox, QAbstractButton)
+                             QFormLayout, QMessageBox, QButtonGroup)
 from PyQt5.QtCore import Qt, QDate, QEvent, pyqtSlot, QVariant
 from PyQt5.QtGui import  QStandardItem, QDoubleValidator, QIntValidator, QMouseEvent
 from PyQt5.QtSql import QSqlDatabase, QSqlQuery,QSqlError, QSqlQueryModel
 from ext.socketclient import  RequestHandler
-from ext import Settings, ComboFocus, APM
+#from ext import Settings, ComboFocus, APM
 from ext.SpinFocus import FocusSpin
 from ext.ListPicker import PickerWidget
 from ext.Contacts import Contacts
+from ext import APM
 
 
 
@@ -84,8 +85,9 @@ class Agreement(QDialog):
 
         self.lineInstallments = QLineEdit('0')
         self.spinInstallments = QSpinBox()
-        self.spinInstallments.setRange(0, 36)
+        self.spinInstallments.setRange(0, 24)
         self.spinInstallments.setMaximumWidth(50)
+        self.spinInstallments.setEnabled(False)
 
         self.lineDownpayment = QLineEdit('0.00')
         self.lineDownpayment.setValidator(valAmount)
@@ -102,14 +104,14 @@ class Agreement(QDialog):
         self.checkBreaking.setTristate(False)
         self.checkBreaking.stateChanged.connect(self.toggleBreaking)
 
-        self.comboSupplier = APM.ComboFocus.FocusCombo(self)
+        self.comboSupplier = APM.FocusCombo(self)
         self.comboSupplier.setMaximumSize(220,30)
         self.comboSupplier.setEditable(True)
         self.comboSupplier.activated.connect(self.supplierChange)
         self.comboSupplier.focusLost.connect(self.supplierFocusLost)
         self.comboSupplier.doubleClicked.connect(self.editContact)
 
-        self.comboResponsible = APM.ComboFocus.FocusCombo()
+        self.comboResponsible = APM.FocusCombo()
         self.comboResponsible.setEditable(True)
         self.comboResponsible.setMaximumSize(200, 25)
         self.comboResponsible.setMinimumSize(200, 25)
@@ -129,10 +131,28 @@ class Agreement(QDialog):
         btnNewContact.clicked.connect(self.newContact)
 
         self.radioAtEnd = QRadioButton("On Completion")
+        self.radioAtEnd.setChecked(True)
+        self.radioAtEnd.toggled.connect(self.paymentOptionChanged)
+
+        self.radioFee = QRadioButton("Monthly Installments")
+        self.radioAtEnd.toggled.connect(self.paymentOptionChanged)
+
+        self.radioOnSite = QRadioButton("Monthly On Site Only")
         self.radioAtEnd.toggled.connect(self.paymentOptionChanged)
 
         self.groupPayment = QGroupBox("Payment Options")
         self.groupPayment.setCheckable(False)
+
+        self.paymentOptions = QButtonGroup()
+        self.paymentOptions.addButton(self.radioFee)
+        self.paymentOptions.addButton(self.radioAtEnd)
+        self.paymentOptions.addButton(self.radioOnSite)
+        self.paymentOptions.setId(self.radioAtEnd, 0)
+        self.paymentOptions.setId(self.radioFee, 1)
+        self.paymentOptions.setId(self.radioOnSite, 2)
+        self.paymentOptions.buttonClicked.connect(self.checkOption)
+
+
 
         #Sales conditions
 
@@ -166,8 +186,6 @@ class Agreement(QDialog):
         self.lineSaleBaseAmount.setValidator(valAmount)
         self.lineSaleBaseAmount.setMaximumWidth(100)
         self.lineSaleBaseAmount.setAlignment(Qt.AlignRight)
-
-        self.radioFee = QRadioButton("Monthly Installments")
 
         self.spinSaleBasePercent = FocusSpin()
         self.spinSaleBasePercent.focusLost.connect(self.saleBaseNoChange)
@@ -314,7 +332,7 @@ class Agreement(QDialog):
         groupLayout = QVBoxLayout()
         groupLayout.addWidget(self.radioAtEnd)
         groupLayout.addWidget(self.radioFee)
-        #groupLayout.addWidget(self.checkPayment)
+        groupLayout.addWidget(self.radioOnSite)
 
         self.groupPayment.setLayout(groupLayout)
 
@@ -458,7 +476,6 @@ class Agreement(QDialog):
     @pyqtSlot()
     def querySize(self):
         querySize = self.picker.sqliteQuerySize
-        print('query:', querySize)
         self.chooseSize = querySize
         self.okSaving()
 
@@ -617,6 +634,15 @@ class Agreement(QDialog):
         self.spinSaleThirdPercent.setEnabled(True)
         self.spinSaleThirdPercent.setFocus()
 
+    #@pyqtSlot()
+    #def enableOnSite(self):
+    #    self.checkOnSite.setEnabled(self.radioFee.isChecked())
+
+    @pyqtSlot()
+    def checkOption(self):
+        print(self.paymentOptions.checkedId())
+
+    @pyqtSlot()
     def paymentOptionChanged(self):
         if self.radioAtEnd.isChecked():
             self.spinInstallments.setValue(0)
@@ -774,7 +800,7 @@ class Agreement(QDialog):
                                                              self.spinInstallments.value(),
                                                              self.normalizeFloat(self.lineDownpayment),
                                                              self.spinMinimum.value(),
-                                                             self.radioAtEnd.isChecked(),
+                                                             self.paymentOptions.checkedId(),
                                                              self.textNotes.document().toHtml(),
                                                              self.normalizeFloat(self.lineSaleBaseAmount),
                                                              self.normalizeFloat(self.lineSaleFirstFrom),

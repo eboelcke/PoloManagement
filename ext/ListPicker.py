@@ -2,10 +2,10 @@ from PyQt5.QtWidgets import (QPushButton, QTableView,QMessageBox,
                              QGridLayout, QApplication, QToolButton, QLabel, QGroupBox)
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
-from PyQt5.QtSql import QSqlQueryModel, QSqlQuery, QSqlDatabase, QSqlDriver
-from PyQt5.QtCore import QVariant, QPoint
-from ext.HorseDetail import CheckHorse
+from PyQt5.QtSql import QSqlQueryModel, QSqlQuery, QSqlDatabase, QSqlError
+from PyQt5.QtCore import QVariant
 from ext.Horses import ShowHorse
+from ext.CQSqlDatabase import Cdatabase
 import sys
 
 class PickerWidget(QGroupBox):
@@ -31,9 +31,8 @@ class PickerWidget(QGroupBox):
         self.loadBaseTable()
 
     def setUI(self):
-        if not self.db.isOpen():
-            self.db.open()
-        self.setWindowIcon(QIcon())
+        #if not self.db.isOpen():
+        #
         self.setMinimumSize(600, 200)
         self.lblTest = QLabel("Test")
         lblInventory = QLabel("Available")
@@ -217,8 +216,10 @@ class PickerWidget(QGroupBox):
             return SQLiteDB
 
     def createTables(self):
-        qryInventory = QSqlQuery(self.SQliteDB)
-        qryInventory.prepare("""
+        try:
+            self.SQliteDB.transaction()
+            qryInventory = QSqlQuery(self.SQliteDB)
+            qryInventory.prepare("""
                             CREATE TABLE IF NOT EXISTS Stock(
                             id INTEGER PRIMARY KEY UNIQUE NOT NULL,
                             rp VARCHAR(5),
@@ -229,15 +230,24 @@ class PickerWidget(QGroupBox):
                             sexid TINYINT(1) NOT NULL,
                             coatid TINYINT(1) NOT NULL)
                             """)
-        qryInventory.exec_()
-        qrychoose = QSqlQuery(self.SQliteDB)
-        qrychoose.prepare("""
+            qryInventory.exec_()
+            qrychoose = QSqlQuery(self.SQliteDB)
+            qrychoose.prepare("""
                         CREATE TABLE IF NOT EXISTS choose (
                         id INTEGER PRIMARY KEY UNIQUE NOT NULL,
                         rp VARCHAR(5),
                         name VARCHAR(45) NOT NULL)
                         """)
-        qrychoose.exec_()
+            qrychoose.exec_()
+            self.SQliteDB.commit()
+        except QSqlError as err:
+            self.SQliteDB.rollback()
+            print("SQlError", err.text())
+        except Exception as err:
+            print(type(err).__name__, err.args)
+            self.SQliteDB.rollback()
+
+
 
     def stockClicked(self):
         qry = self.horseView.model().query()
@@ -326,8 +336,7 @@ class PickerWidget(QGroupBox):
                                                             'Must save the agreement before saving the agreement horses')
             return
         try:
-            insertDB = QSqlDatabase.cloneDatabase(self.db, 'insert')
-            if insertDB.open():
+            with Cdatabase(self.db, 'InsertDB') as insertDB:
                 qry = self.selectView.model().query()
                 qry.seek(-1)
                 qryInsert = QSqlQuery(insertDB)
@@ -341,9 +350,6 @@ class PickerWidget(QGroupBox):
                     qryInsert.exec()
         except Exception as err:
             print(type(err).__name__, err.args)
-        finally:
-            if insertDB.isOpen():
-                insertDB.close()
 
 
 

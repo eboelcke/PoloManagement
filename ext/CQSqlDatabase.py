@@ -1,6 +1,5 @@
-import sys
-from PyQt5.QtSql import QSqlDatabase, QSqlDriver
-from PyQt5.QtWidgets import QMessageBox
+
+from PyQt5.QtSql import QSqlDatabase
 from ext.APM import DataError
 
 

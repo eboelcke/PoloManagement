@@ -1,8 +1,8 @@
 import sys
 import os
 
-from PyQt5.QtWidgets import (QWidget, QDialog, QHBoxLayout, QVBoxLayout,QFormLayout, QLabel, QLineEdit, QComboBox,
-                             QPushButton, QApplication, QFileDialog, QMessageBox)
+from PyQt5.QtWidgets import (QGroupBox, QDialog, QHBoxLayout, QVBoxLayout,QFormLayout, QLabel, QLineEdit, QComboBox,
+                             QPushButton, QApplication, QFileDialog, QMessageBox, QFrame, QPlainTextEdit)
 from PyQt5.QtCore import Qt, QSettings, QCoreApplication, pyqtSlot
 from PyQt5.QtSql import QSqlDatabase
 from configparser import ConfigParser
@@ -27,26 +27,44 @@ class SettingsDialog(QDialog):
 
     def setUI(self):
         self.setWindowTitle("Settings")
-        self.setGeometry(50,50, 500,500)
-        lblDatabaseTitle = QLabel("Database Connection")
+        self.setGeometry(50,50, 1000,500)
+        lblDatabaseTitle = QLabel("MySQL Database Connection")
         lblDatabaseTitle.setAlignment(Qt.AlignCenter)
-        lblDatabaseName = QLabel("Database")
         lblDatabaseHost = QLabel("Host: ")
+        lblDatabaseName = QLabel("Database")
         lblDatabaseUser = QLabel("User")
         lblDatabasePwd = QLabel("Password")
         lblTest = QLabel("Database Test")
-        lblServerTest = QLabel("Server Connection Test")
-        self.lblServerTestResult = QLabel('Server connection untested')
-        self.lblServerTestResult.setStyleSheet("QLabel {background-color: black; color:white}")
-        self.lblTestResult = QLabel("Connection Untested")
-        self.lblTestResult.setStyleSheet("QLabel {background-color: black; color: white}")
+        lblServerTest = QLabel("Connection Test")
+        lblTCP = QLabel("TCP Server")
+        lblTCP.setAlignment(Qt.AlignHCenter)
 
-        lblServer = QLabel("Server Data", self)
-        lblServer.setAlignment(Qt.AlignCenter)
+        lblOwnerTitle = QLabel("Horse Owner")
+        lblOwnerTitle.setAlignment(Qt.AlignHCenter)
+
+        lblOwner = QLabel("Owner")
+        self.lineOwner = QLineEdit()
+
+        lblAddress = QLabel("Address")
+        self.textAddress = QPlainTextEdit()
+
+        lblFarm = QLabel("Farm")
+        self.lineFarm = QLineEdit()
+        lblFarmAddress = QLabel("Farm Address")
+        self.textFarmAddress = QPlainTextEdit()
+
+
+        self.lblServerTestResult = QLabel('Untested')
+        self.lblServerTestResult.setStyleSheet("QLabel {background-color: black; color:white}")
+        self.lblServerTestResult.setMaximumWidth(150)
+        self.lblTestResult = QLabel("Untested")
+        self.lblTestResult.setStyleSheet("QLabel {background-color: black; color: white}")
+        self.lblTestResult.setMaximumWidth(150)
+
         lblServerName = QLabel("Server Name", self)
         lblServerPort = QLabel("Port Number", self)
 
-        lblOrganization = QLabel("Organization and Software")
+        lblOrganization = QLabel("Application Developer")
         lblOrganization.setAlignment(Qt.AlignCenter)
         lblOrganizationName = QLabel("Organization")
         lblSoftwareName = QLabel("Title")
@@ -57,9 +75,15 @@ class SettingsDialog(QDialog):
         lblIconsDir = QLabel("Icons")
 
         self.lineDatabaseHost = QLineEdit()
+        self.lineDatabaseHost.setMaximumWidth(210)
         self.lineDatabaseName = QLineEdit()
+        self.lineDatabaseName.setMaximumWidth(210)
+
         self.lineDatabaseUser = QLineEdit()
+        self.lineDatabaseUser.setMaximumWidth(210)
+
         self.lineDatabasePwd = QLineEdit()
+        self.lineDatabasePwd.setMaximumWidth(210)
         self.lineDatabasePwd.setEchoMode(QLineEdit.PasswordEchoOnEdit)
 
         self.lineOrganizationName = QLineEdit()
@@ -68,10 +92,12 @@ class SettingsDialog(QDialog):
         self.lineIconsDir = QLineEdit()
 
         self.lineServerName = QLineEdit()
+        self.lineServerName.setMaximumWidth(210)
         self.lineServerPort = QLineEdit()
+        self.lineServerPort.setMaximumWidth(210)
         self.lineServerPort.editingFinished.connect(self.portAssert)
 
-        self.btnOk = QPushButton("OK")
+        self.btnOk = QPushButton("Save")
         self.btnOk.setEnabled(False)
         self.btnOk.clicked.connect(self.saveAndClose)
 
@@ -83,11 +109,11 @@ class SettingsDialog(QDialog):
         btnCancel.clicked.connect(self.close)
 
         btnTest = QPushButton("Test")
-        btnTest.setMaximumWidth(100)
+        btnTest.setMaximumWidth(50)
         btnTest.clicked.connect(self.connectionTest)
 
-        btnServer = QPushButton("Server")
-        btnServer.setMaximumWidth(100)
+        btnServer = QPushButton("Test")
+        btnServer.setMaximumWidth(50)
         btnServer.clicked.connect(self.serverTest)
 
         btnDir = QPushButton("...")
@@ -95,17 +121,16 @@ class SettingsDialog(QDialog):
         btnDir.setMaximumHeight(28)
         btnDir.clicked.connect(self.lookForFile)
 
-
-        btnHLayout = QHBoxLayout()
-        frmLayout = QFormLayout()
+        lfrmLayout = QFormLayout()
+        rfrmLayout = QFormLayout()
         testHLayout = QHBoxLayout()
         dirHLayout = QHBoxLayout()
-        vLayout = QVBoxLayout()
 
+        btnHLayout = QHBoxLayout()
         btnHLayout.addWidget(self.btnContinue)
         btnHLayout.addStretch(10)
-        btnHLayout.addWidget(self.btnOk)
         btnHLayout.addWidget(btnCancel)
+        btnHLayout.addWidget(self.btnOk)
 
         testHLayout.addWidget(btnTest)
         testHLayout.addWidget(self.lblTestResult)
@@ -117,28 +142,45 @@ class SettingsDialog(QDialog):
         dirHLayout.addWidget(self.lineAgreementDir)
         dirHLayout.addWidget(btnDir)
 
-        frmLayout.addRow(lblDatabaseTitle)
-        frmLayout.addRow(lblDatabaseHost, self.lineDatabaseHost)
-        frmLayout.addRow(lblDatabaseName, self.lineDatabaseName)
-        frmLayout.addRow(lblDatabaseUser, self.lineDatabaseUser)
-        frmLayout.addRow(lblDatabasePwd, self.lineDatabasePwd)
-        frmLayout.addRow(lblTest, testHLayout)
-        frmLayout.addRow(lblOrganization)
-        frmLayout.addRow(lblOrganizationName, self.lineOrganizationName)
-        frmLayout.addRow(lblSoftwareName, self.lineSoftwareName)
-        frmLayout.addRow(lblPath)
-        frmLayout.addRow(lblAgreementDir, dirHLayout)
-        frmLayout.addRow(lblIconsDir, self.lineIconsDir)
-        frmLayout.addRow(lblServerName, self.lineServerName)
-        frmLayout.addRow(lblServerPort, self.lineServerPort)
-        frmLayout.addRow(lblServerTest, serverHLayout)
+        lfrmLayout.addRow(lblDatabaseTitle)
+        lfrmLayout.addRow(lblDatabaseHost, self.lineDatabaseHost)
+        lfrmLayout.addRow(lblDatabaseName, self.lineDatabaseName)
+        lfrmLayout.addRow(lblDatabaseUser, self.lineDatabaseUser)
+        lfrmLayout.addRow(lblDatabasePwd, self.lineDatabasePwd)
+        lfrmLayout.addRow(lblTest, testHLayout)
+        lfrmLayout.addRow(lblTCP)
+        lfrmLayout.addRow(lblServerName, self.lineServerName)
+        lfrmLayout.addRow(lblServerPort, self.lineServerPort)
+        lfrmLayout.addRow(lblServerTest, serverHLayout)
+        lfrmLayout.addRow(lblOrganization)
+        lfrmLayout.addRow(lblOrganizationName, self.lineOrganizationName)
+        lfrmLayout.addRow(lblSoftwareName, self.lineSoftwareName)
+        lfrmLayout.addRow(lblPath)
+        lfrmLayout.addRow(lblAgreementDir, dirHLayout)
+        lfrmLayout.addRow(lblIconsDir, self.lineIconsDir)
 
-        vLayout.addLayout(frmLayout)
-        vLayout.addStretch(10)
-        vLayout.addLayout(btnHLayout)
-        self.setLayout(vLayout)
 
-        settings = QSettings(":ext/config.ini", QSettings.IniFormat)
+        rfrmLayout.addRow(lblOwnerTitle)
+        rfrmLayout.addRow(lblOwner, self.lineOwner)
+        rfrmLayout.addRow(lblAddress, self.textAddress)
+        rfrmLayout.addRow(lblFarm, self.lineFarm)
+        rfrmLayout.addRow(lblFarmAddress, self.textFarmAddress)
+
+
+        frameLeft = QGroupBox("Servers")
+        frameLeft.setLayout(lfrmLayout)
+        frameRight = QGroupBox("Data and Directories")
+        frameRight.setLayout(rfrmLayout)
+
+        frameLayout = QHBoxLayout()
+        frameLayout.addWidget(frameLeft)
+        frameLayout.addWidget(frameRight)
+        layout = QVBoxLayout()
+        layout.addLayout(frameLayout)
+        layout.addLayout(btnHLayout)
+        self.setLayout(layout)
+
+        settings = QSettings("ext/config.ini", QSettings.IniFormat)
         self.lineDatabaseHost.setText(settings.value("mysql/host"))
         self.lineDatabaseName.setText(settings.value("mysql/Database"))
         self.lineDatabaseUser.setText(settings.value("mysql/user"))
@@ -153,6 +195,11 @@ class SettingsDialog(QDialog):
         self.lineServerName.setText(settings.value("Server/serverName"))
         self.lineServerPort.setText(settings.value("Server/serverPort"))
         self.address = self.serverAddress
+
+        self.lineOwner.setText(settings.value("owner/ownerName"))
+        self.textAddress.setPlainText(settings.value("owner/Address"))
+        self.lineFarm.setText(settings.value("owner/FarmName"))
+        self.textFarmAddress.setPlainText(settings.value("owner/FarmAddress"))
 
     @property
     def serverAddress(self):
@@ -180,7 +227,7 @@ class SettingsDialog(QDialog):
 
     @pyqtSlot()
     def serverTest(self):
-        self.lblServerTestResult.setText("Connecting to the Server.....")
+        self.lblServerTestResult.setText("Connecting")
         self.lblServerTestResult.setStyleSheet("QLabel {background-color:yellow; color: black}")
         self.repaint()
         try:
@@ -193,19 +240,19 @@ class SettingsDialog(QDialog):
                 self.checkBtnEnabled()
                 return True, ok[1]
             else:
-                self.lblServerTestResult.setText("Connection Failed")
+                self.lblServerTestResult.setText("Failed")
                 self.lblServerTestResult.setStyleSheet("QLabel {background-color:red; color: white}")
-                return False, "Connection Failed"
+                return False, "Failed"
 
         except TypeError as err:
-            self.lblServerTestResult.setText("Connection Failed")
+            self.lblServerTestResult.setText("Failed")
             self.lblServerTestResult.setStyleSheet("QLabel {background-color:red; color: white}")
             pop = QMessageBox()
-            pop.setText("Connection to the python server failed")
+            pop.setText("Connection to the python server Failed")
             pop.setDetailedText(err.args[0])
             pop.show()
             pop.exec_()
-            return False, "Connection Failed"
+            return False, "Failed"
 
     @pyqtSlot()
     def goForward(self):
@@ -257,16 +304,21 @@ class SettingsDialog(QDialog):
                 sett.setValue("Server/serverName", self.lineServerName.text())
                 sett.setValue("Server/serverPort", self.lineServerPort.text())
 
+                sett.setValue("owner/ownerName", self.lineOwner.text())
+                sett.setValue("owner/Address", self.textAddress.toPlainText())
+                sett.setValue("owner/FarmName", self.lineFarm.text())
+                sett.setValue("owner/FarmAddress", self.textFarmAddress.toPlainText())
+
 
             except Exception as err:
-                print(err)
+                print(tyoe(err).__name__, err.args)
             self.accept()
 
     def close(self):
         try:
             self.reject()
         except Exception as err:
-            print(err)
+            print(type(err).__name__, err.args)
 
     def read_db_config(self,section='mysql', configfile = 'config.ini'):
         """ Read database configuration file and return a dictionary object
@@ -294,10 +346,10 @@ class SettingsDialog(QDialog):
 
     @pyqtSlot()
     def connectionTest(self):
-        self.lblTestResult.setText("Connecting to MYSQL server........")
+        self.lblTestResult.setText("Connecting")
         self.lblTestResult.setStyleSheet("QLabel{background-color: yellow; color: black}")
         self.repaint()
-        testMessage = "Connection Failed"
+        testMessage = "Failed"
         self.con_string = {'host': self.lineDatabaseHost.text(), 'user': self.lineDatabaseUser.text(),
                            'database': self.lineDatabaseName.text(), 'password': self.lineDatabasePwd.text()}
         try:
@@ -308,7 +360,7 @@ class SettingsDialog(QDialog):
             db.setDatabaseName(self.con_string['database'])
             ok = db.open()
             if ok:
-                testMessage = "Connection Succeeded"
+                testMessage = "Succeeded"
                 self.state = True
                 self.lblTestResult.setStyleSheet("QLabel{background-color: green; color: white}")
                 self.databaseOk = True
@@ -327,6 +379,22 @@ class SettingsDialog(QDialog):
             pop.exec_()
             return False, None
         return True, db
+
+    @property
+    def owner(self):
+        return self.lineOwner.text()
+
+    @property
+    def ownerAddress(self):
+        return self.textAddress.toPlainText()
+
+    @property
+    def farm(self):
+        return self.lineFarm.text()
+
+    @property
+    def farmAddress(self):
+        return self.textFarmAddress.toPlainText()
 
     def checkBtnEnabled(self):
         if self.okToSave.count(True) == 2:
