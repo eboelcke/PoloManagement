@@ -4,20 +4,29 @@ from PyQt5.QtWidgets import (QDialog, QLabel, QLineEdit, QDateEdit, QGridLayout,
                              QMessageBox)
 from PyQt5.QtGui import QStandardItemModel, QStandardItem
 from PyQt5.QtCore import QSettings, QVariant, QDate, Qt
-from ext.CQSqlDatabase import Cdatabase
-from ext.APM import FocusCombo, QSqlAlignColorQueryModel,NullDateEdit, DataError
+#from ext.CQSqlDatabase import Cdatabase
+from ext.APM import (FocusCombo, QSqlAlignColorQueryModel,NullDateEdit, DataError,
+                     PAYABLES_TYPE_FULL_BREAK, PAYABLES_TYPE_HALF_BREAK,
+                     BRAKE_TYPE_FINAL, BRAKE_TYPE_HALFBREAKE, BRAKE_TYPE_INCOMPLETE)
 from PyQt5.QtSql import QSqlQuery
 import pymysql
 
 class ReceiveBroken(QDialog):
 
-    def __init__(self, db, con_string, agreementId=None):
+    def __init__(self, db, con_string, agreementId=None, parent=None):
         super().__init__()
         self.horseId = None
+        self.halfBreak = None
         self.agreementHorseId = None
         self.agreementId = agreementId
         self.con_string = con_string
         self.db = db
+        if not self.db.isOpen():
+            self.db.open()
+        self.parent = parent
+        self.supplierId = parent.supplierId
+        if not self.db.isOpen():
+            self.db.open()
         self.setUI()
 
     def setUI(self):
@@ -58,25 +67,25 @@ class ReceiveBroken(QDialog):
         lblDor = QLabel("Receiving Date")
         self.dateDor = NullDateEdit(self)
         self.dateDor.setToolTip("Receiving Date")
-        self.dateDor.setMinimumDate(QDate.currentDate().addDays(-180))
-        self.dateDor.setMinimumDate(QDate.currentDate())
-        self.dateDor.setDate(QDate.currentDate())
+        self.dateDor.setMinimumDate(self.getLastBoardDate())
+        self.dateDor.setDate(self.dateDor.date)
         self.dateDor.dateChanged.connect(self.enableSave)
 
-
-        keys = ('0', '1', '2', '3')
-        types = ('Polo', 'Criolla', 'Half Break', 'Incomplete')
-        typeModel = QStandardItemModel(4, 2)
+        keys = ('0', '1', '2')
+        types = ('Full Break', 'Half Break', 'Incomplete')
+        payable = ('2', '3', '5')
+        typeModel = QStandardItemModel(3, 3)
         for row, type in enumerate(types):
             item = QStandardItem(keys[row])
             typeModel.setItem(row, 0, item)
             item = QStandardItem(types[row])
-            typeModel.setItem(row, 1, item)
+            typeModel.setItem(row,1,item)
+            item = QStandardItem(payable[row])
+            typeModel.setItem(row, 2, item)
 
 
         lblBreakType = QLabel("Break Type")
         self.comboType = FocusCombo()
-        self.comboType.addItems({'1':'Polo','2': 'Criolla', '3': '1/2 Break', '4': 'Incomplete'})
         self.comboType.addItem('23')
         self.comboType.setMaximumWidth(200)
         self.comboType.setModel(typeModel)
@@ -84,8 +93,9 @@ class ReceiveBroken(QDialog):
         self.comboType.setModelColumn(1)
         self.comboType.activated.connect(self.enableSave)
 
-        rates = ('Excellent', 'Very Good', 'Fair', 'Poor')
-        rateModel = QStandardItemModel(4, 2)
+        keys = ('0', '1', '2', '3', '4')
+        rates = ('Excellent', 'Very Good', 'Good','Fair', 'Poor')
+        rateModel = QStandardItemModel(5, 2)
 
         for row, rate in enumerate(rates):
             item = QStandardItem(keys[row])
@@ -117,7 +127,8 @@ class ReceiveBroken(QDialog):
 
         centerColumns = [1, 5]
         colorDict = {}
-        model = QSqlAlignColorQueryModel(centerColumns, colorDict)
+        rightColumns = []
+        model = QSqlAlignColorQueryModel(centerColumns, rightColumns, colorDict)
         try:
             model.setQuery(self.loadHorses())
             model.setHeaderData(0,Qt.Horizontal, 'Provider')
@@ -131,6 +142,7 @@ class ReceiveBroken(QDialog):
             self.table.hideColumn(3)
             self.table.hideColumn(6)
             self.table.hideColumn(7)
+            self.table.hideColumn(8)
 
             header = self.table.horizontalHeader()
             header.setSectionResizeMode(0, QHeaderView.Stretch)
@@ -138,6 +150,10 @@ class ReceiveBroken(QDialog):
             header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
             header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
             header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+
+            self.table.verticalHeader().setDefaultSectionSize(25)
+            self.table.horizontalHeader().setStyleSheet("QHeaderView { font-size: 8pt;}")
+            self.table.setStyleSheet("QTableView {font-size: 8pt;}")
 
             lblDetail = QLabel("Horses List")
             layout = QGridLayout()
@@ -178,9 +194,31 @@ class ReceiveBroken(QDialog):
             raise DataError(err.source, err.message)
             return
 
+    def getLastBoardDate(self):
+        try:
+            qry = QSqlQuery(self.db)
+            qry.prepare("""SELECT MAX(b.boardingdate) FROM 
+            agreements a
+            INNER JOIN agreementhorses ah 
+            ON a.id = ah.agreementid
+            INNER JOIN boarding  b 
+            ON a.supplierid = b.supplierid 
+            WHERE a.id= ?""")
+            qry.addBindValue(QVariant(self.agreementId))
+            qry.exec()
+            if qry.lastError().type() != 0:
+                raise DataError("getLastBoardDate", qry.lastError().text())
+            qry.first()
+            if not qry.value(0).isNull():
+                return qry.value(0)
+            return qry.value(1)
+        except DataError as err:
+            print(err.source, err.message)
+
     def loadHorses(self):
-        with Cdatabase(self.db, 'Breaking') as cdb:
-            qry = QSqlQuery(cdb)
+
+        try:
+            qry = QSqlQuery(self.db)
             sql_qry = """
                          SELECT 
                          c.fullname AS Provider, 
@@ -190,7 +228,8 @@ class ReceiveBroken(QDialog):
                           ah.dos AS 'Starting Date',
                           TIMESTAMPDIFF(DAY, ah.dos, CURRENT_DATE()) AS Days,
                           ah.id AS 'agreementhorseid',
-                          h.id as horseid
+                          h.id as horseid,
+                          a.halfbreakpercent as half
                           FROM agreements as a
                           INNER JOIN agreementhorses as ah
                           ON a.id = ah.agreementid
@@ -198,11 +237,11 @@ class ReceiveBroken(QDialog):
                           ON ah.horseid = h.id
                           INNER JOIN contacts as c
                           ON a.supplierid = c.id
-                          INNER JOIN contacts as cb
+                          LEFT JOIN contacts as cb
                           ON ah.breakerid = cb.id
                           WHERE h.isbroke = False
                           AND ah.dos IS NOT null
-                          AND ah.active = TRUE  
+                          AND ah.billable = TRUE  
                           """
             if self.agreementId:
                 sql_qry += "AND a.id = ?"
@@ -214,8 +253,13 @@ class ReceiveBroken(QDialog):
                 raise DataError("loadHorses","No Data Available")
             elif qry.size() == -1:
                 raise DataError("loadHorses", qry.lastError().text())
-            print(qry.size())
             return qry
+        except DataError as err:
+            print(err.source, err.message)
+            raise DataError(err.source, err.message)
+            #self.parent.messageBox(self,err.source, err.message)
+        except Exception as err:
+            print('loadHorses', type(err).__name__, err.args)
 
     def getHorseData(self):
         row = self.table.currentIndex().row()
@@ -237,6 +281,7 @@ class ReceiveBroken(QDialog):
                 self.lineDays.setText(str(record.value(5)))
                 self.agreementHorseId = record.value(6)
                 self.horseId = record.value(7)
+                self.halfBreak = record.value(8)
 
         except Exception as err:
             print(type(err).__name__, err.args)
@@ -268,43 +313,97 @@ class ReceiveBroken(QDialog):
                 self.pushSave.setEnabled(False)
 
     def saveAndClose(self):
-        "Requieres to save on breaking table and to update broke in horses and active in agreementhorses? "
+        """"Requieres to save on breaking table  and payables table .and to update broke in horses and active in agreementhorses?
+        Remember to transfer the hores to the ownere´s main location or establish a new contract with the horses
+         currently located"""
         try:
+            qryAmount = QSqlQuery(self.db)
             cnn = pymysql.connect(**self.con_string)
             cnn.begin()
             with cnn.cursor() as cur:
                 sql_breaking = """ INSERT INTO breaking
                 (agreementhorseid, dor, type, rate, notes)
                 VALUES (%s, %s, %s, %s, %s)"""
-                self.comboType.setModelColumn(0)
-                self.comboRate.setModelColumn(0)
                 parameters = (self.agreementHorseId,
                               self.dateDor.date.toString('yyyy-MM-dd'),
-                              self.comboType.currentText(),
-                              self.comboRate.currentText(),
+                              self.comboType.getHiddenData(0),
+                              self.comboRate.getHiddenData(0),
                               self.notes.toPlainText())
                 cur.execute(sql_breaking, parameters)
-                if int(parameters[2]) <= 2:
+                breakingid = cur.lastrowid
+                if parameters[2] == BRAKE_TYPE_FINAL:
                     sql_horses = """ UPDATE horses 
-                    SET isbroke = True 
+                    SET isbroke = 1, 
+                    isbreakable = 0
                     WHERE id = %s"""
-                    sql_agreementhorses = """ UPDATE agreementhorses
-                    SET active = False 
+                    cur.execute(sql_horses, (self.horseId,))
+                    qryAmount.prepare("""
+                                SELECT 
+                                a.totalamount - COALESCE(SUM(p.amount),0)
+                                FROM agreements a 
+                                INNER JOIN  agreementhorses ah
+                                ON a.id = ah.agreementid
+                                LEFT JOIN payables p
+                                ON ah.id = p.agreementhorseid
+                                WHERE (p.typeid = 0 OR p.typeid = 1 OR p.typeid IS NULL) 
+                                AND ah.id = ? """)
+                    qryAmount.addBindValue(self.agreementHorseId)
+                    qryAmount.exec()
+                    if qryAmount.lastError().type() != 0:
+                        raise DataError("saveAndClose", qryAmount.lastError().text())
+                    if qryAmount.first():
+                        if qryAmount.value(0) > 0:
+                            sql_payable = """INSERT INTO payables 
+                                (agreementhorseid, ticketid, concept, amount, typeid) 
+                                VALUES (%s, %s, %s, %s, %s)"""
+                            parampay = (self.agreementHorseId, breakingid, "Final payment for the break of {}".format(self.lineHorse.text()),
+                            qryAmount.value(0),PAYABLES_TYPE_FULL_BREAK)
+                            cur.execute(sql_payable, parampay)
+                if parameters[2] == BRAKE_TYPE_HALFBREAKE and self.halfBreak:
+                    qryAmount.prepare("""
+                                SELECT 
+                                COALESCE(a.halfbreakpercent * a.totalamount * 0.01 - SUM(p.amount), 0 ) 
+                                FROM agreements a
+                                INNER JOIN agreementhorses ah
+                                ON a.id = ah.agreementid
+                                LEFT JOIN  payables P
+                                ON  ah.id = p.agreementhorseid  
+                                WHERE (p.typeid = 0 OR p.typeid = 1 OR p.typeid = 2 OR p.typeid = 3)
+                                AND ah.id = ? 
+                                GROUP BY ah.id""")
+                    qryAmount.addBindValue(self.agreementHorseId)
+                    qryAmount.exec()
+                    if qryAmount.lastError().type() != 0:
+                        raise DataError("saveAndClose", qryAmount.lastError().text())
+                    if qryAmount.first():
+                        if qryAmount.value(0) > 0:
+                            sql_payable = """INSERT INTO payables 
+                                (agreementhorseid, ticketid, concept, amount, typeid) 
+                                VALUES (%s, %s, %s, %s, %s)"""
+                            parampay = (self.agreementHorseId, breakingid,
+                                        "Final payment for the half-break of {}".format(self.lineHorse.text()),
+                            qryAmount.value(0),PAYABLES_TYPE_HALF_BREAK)
+                            cur.execute(sql_payable, parampay)
+                sql_agreementhorses = """ UPDATE agreementhorses
+                    SET billable = False 
                     WHERE id = %s"""
-                    cur.execute(sql_horses, self.horseId )
-                    cur.execute(sql_agreementhorses, self.agreementHorseId)
-                cnn.commit()
-
-
-        except pymysql.Error as err:
-            QMessageBox.Warning("saveAndClose", (type(err).__name__ , err.args))
-            cnn.rollback()
-        finally:
-
-            self.comboType.setModelColumn(1)
-            self.comboRate.setModelColumn(1)
+                cur.execute(sql_agreementhorses, self.agreementHorseId)
+            cnn.commit()
             self.table.model().setQuery(self.loadHorses())
             self.clearForm()
+        except DataError as err:
+            print(err.source, err.message)
+            #raise DataError(err.source, err.message)
+            self.parent.messageBox(err.source, err.message)
+            cnn.rollback()
+        except pymysql.Error as err:
+            print("saveAndClose",err.args)
+            cnn.rollback()
+        except Exception as err:
+            print('saveAndClose',type(err).__name__, err.args)
+        finally:
+            cnn.close()
+
 
     def conTest(self):
         if self.cnx.open:

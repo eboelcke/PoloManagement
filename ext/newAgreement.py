@@ -7,11 +7,11 @@ from PyQt5.QtCore import Qt, QDate, QEvent, pyqtSlot, QVariant
 from PyQt5.QtGui import  QStandardItem, QDoubleValidator, QIntValidator, QMouseEvent
 from PyQt5.QtSql import QSqlDatabase, QSqlQuery,QSqlError, QSqlQueryModel
 from ext.socketclient import  RequestHandler
-#from ext import Settings, ComboFocus, APM
 from ext.SpinFocus import FocusSpin
 from ext.ListPicker import PickerWidget
 from ext.Contacts import Contacts
 from ext import APM
+from ext.Settings import SettingsDialog
 
 
 
@@ -32,24 +32,26 @@ class Agreement(QDialog):
     def __init__(self,db, address, parent=None):
         super().__init__(parent= None)
         self.parent = parent
-        self.db = QSqlDatabase.cloneDatabase(db, 'newAgreement')
-        self.db.open()
+        self.db = db
+        if not self.db.isOpen():
+            self.db.open()
         self.address = address
         self.setModal(True)
         self.supplierId = None
         self.responsibleId = None
-        self.agreementTitle = ['', '', '']
-        self.okToSave = [None, None, None, None, None]
+        self.agreementTitle = ['', "- Play & Sale Agreement - ", QDate.currentDate().toString("MM-dd-yyyy")]
+        self.okToSave = [None,
+        QDate.currentDate(), None, None, None]
         self.playOkToSave = None
-        self.chooseSize = 0
+        self.chooseSize = None
         self.agreementId = None
         self.filename = None
         self.setWindowTitle("New Play & Sale Agreement")
         self.setUi()
-        self.load_combos()
 
 
-        self.toggleBreaking()
+
+        #self.toggleBreaking()
         self.radioAtEnd.setChecked(True)
 
     def setUi(self):
@@ -116,6 +118,8 @@ class Agreement(QDialog):
         self.comboResponsible.setMaximumSize(200, 25)
         self.comboResponsible.setMinimumSize(200, 25)
         self.comboResponsible.focusLost.connect(self.responsibleFocusLost)
+
+        self.load_combos()
 
         btnClose = QPushButton("Cancel", self)
         btnClose.clicked.connect(self.close)
@@ -188,10 +192,7 @@ class Agreement(QDialog):
         self.lineSaleBaseAmount.setAlignment(Qt.AlignRight)
 
         self.spinSaleBasePercent = FocusSpin()
-        self.spinSaleBasePercent.focusLost.connect(self.saleBaseNoChange)
-        self.spinSaleBasePercent.setObjectName('0')
         self.spinSaleBasePercent.valueChanged.connect(lambda :self.setLastPercent(self.spinSaleBasePercent.value()))
-        self.spinSaleBasePercent.focusLost.connect(lambda : self.checkValues(self.spinSaleBasePercent.value()))
 
         self.lineSaleFirstFrom = QLineEdit('0.00')
         self.lineSaleFirstFrom.setEnabled(False)
@@ -208,10 +209,7 @@ class Agreement(QDialog):
 
         self.spinSaleFirstPercent = FocusSpin()
         self.spinSaleFirstPercent.setEnabled(False)
-        self.spinSaleFirstPercent.setObjectName('1')
         self.spinSaleFirstPercent.valueChanged.connect(lambda: self.setLastPercent(self.spinSaleFirstPercent.value()))
-        self.spinSaleFirstPercent.focusLost.connect(lambda: self.checkValues(self.spinSaleFirstPercent.value()))
-
         self.lineSaleSecondFrom = QLineEdit('0.00')
         self.lineSaleSecondFrom.setEnabled(False)
         self.lineSaleSecondFrom.setMaximumWidth(100)
@@ -226,11 +224,11 @@ class Agreement(QDialog):
 
         self.spinSaleSecondPercent = FocusSpin()
         self.spinSaleSecondPercent.setEnabled(False)
-        self.spinSaleSecondPercent.setObjectName('2')
         self.spinSaleSecondPercent.valueChanged.connect(lambda: self.setLastPercent(self.spinSaleSecondPercent.value()))
-        self.spinSaleSecondPercent.focusLost.connect(lambda: self.checkValues(self.spinSaleSecondPercent.value()))
+
         self.lineSaleThirdFrom = QLineEdit('0.00')
         self.lineSaleThirdFrom.setEnabled(False)
+        self.lineSaleThirdFrom.setValidator(valAmount)
         self.lineSaleThirdFrom.setMaximumWidth(100)
         self.lineSaleThirdFrom.setAlignment(Qt.AlignRight)
 
@@ -243,9 +241,7 @@ class Agreement(QDialog):
 
         self.spinSaleThirdPercent = FocusSpin()
         self.spinSaleThirdPercent.setEnabled(False)
-        self.spinSaleThirdPercent.setObjectName('3')
         self.spinSaleThirdPercent.valueChanged.connect(lambda: self.setLastPercent(self.spinSaleThirdPercent.value()))
-        self.spinSaleThirdPercent.focusLost.connect(lambda: self.checkValues(self.spinSaleThirdPercent.value()))
 
         self.lineSaleFinalAmount = QLineEdit('0.00')
         self.lineSaleFinalAmount.setEnabled(False)
@@ -254,7 +250,7 @@ class Agreement(QDialog):
 
         self.spinSaleFinalPercent = QSpinBox()
 
-        self.picker = PickerWidget(False, db=self.db, parent=self)
+        self.picker = PickerWidget(False, db=self.db, con_string=self.parent.con_string,parent=self)
         self.picker.increase.connect(self.querySize)
 
         groupBasic = QGroupBox()
@@ -353,13 +349,14 @@ class Agreement(QDialog):
         bottonLayout = QHBoxLayout()
         bottonLayout.addSpacing(100)
         bottonLayout.addWidget(self.picker)
-        bottonLayout.addLayout(notesLayout)
+        #bottonLayout.addLayout(notesLayout)
         bottonLayout.addSpacing(100)
 
         vLayout = QVBoxLayout()
         vLayout.addLayout(basicLayout)
         vLayout.addLayout(middleLayout)
         vLayout.addLayout(bottonLayout)
+        vLayout.addLayout(notesLayout)
         vLayout.addLayout(btnLayout)
 
         vLayout.setContentsMargins(-1,-1,-1,0)
@@ -367,6 +364,10 @@ class Agreement(QDialog):
 
         self.setLayout(vLayout)
         self.setMaximumSize(1000, 500)
+
+    @pyqtSlot()
+    def sendSupplier(self):
+        self.picker.supplierId = self.comboSupplier.getHiddenData(0)
 
     def eventFilter(self, watched, event):
         if watched == self.comboSupplier and event == QEvent.MouseButtonDblClick:
@@ -411,6 +412,7 @@ class Agreement(QDialog):
             self.setFocusPolicy(Qt.NoFocus)
             name = combo.currentText()
             if combo.findText(name) > -1:
+                self.okToSave[3] = combo.getHiddenData(0)
                 return
             else:
                 if name.count(',') == 0 :
@@ -475,8 +477,7 @@ class Agreement(QDialog):
 
     @pyqtSlot()
     def querySize(self):
-        querySize = self.picker.sqliteQuerySize
-        self.chooseSize = querySize
+        self.chooseSize = self.picker.querySize
         self.okSaving()
 
     @pyqtSlot()
@@ -518,6 +519,8 @@ class Agreement(QDialog):
             self.modelSupplier = QSqlQueryModel()
             self.modelSupplier.setQuery(self.qryPlayer)
             self.comboSupplier.setModel(self.modelSupplier)
+            self.comboSupplier.setModelColumn(1)
+            self.comboSupplier.setCurrentIndex(0)
 
             self.modelResponsible = QSqlQueryModel()
             self.modelResponsible.setQuery(self.qryresponsible)
@@ -548,95 +551,56 @@ class Agreement(QDialog):
             self.spinSaleFinalPercent.setValue(0)
 
     @pyqtSlot()
-    def saleBaseNoChange(self):
-        try:
-            if self.spinSaleBasePercent.value() == 0:
-                self.lineSaleFirstTo.setText('0.00')
-        except Exception as err:
-            print(err)
-
-
-    @pyqtSlot()
     def saleBaseAmountChanged(self):
-        self.lineSaleFirstFrom.setText(str(float(self.lineSaleBaseAmount.text())+1))
+        self.lineSaleFirstFrom.setText(str(float(self.lineSaleBaseAmount.text()) + 1))
         self.lineSaleFirstTo.setText('0.00')
         self.lineSaleFinalAmount.setText(self.lineSaleFirstFrom.text())
         self.lineSaleFirstTo.setEnabled(True)
-
-
-    @pyqtSlot(int)
-    def checkValues(self, value):
-        if self.sender().objectName() == '0':
-            pass
-        if self.sender().objectName() == '1':
-            if value == 0:
-                self.lineSaleFirstFrom.setText('0.00')
-                self.lineSaleFirstTo.setEnabled(False)
-                self.lineSaleFirstTo.setText('0.00')
-            else:
-                if float(self.lineSaleFirstTo.text()) < float(self.lineSaleFirstFrom.text()):
-                    self.warningMessage("Data Error", "The upper limit must be greater than the lower")
-                    self.lineSaleFirstTo.setFocus()
-                    return
-                self.lineSaleSecondFrom.setText(str(float(self.lineSaleFirstTo.text()) + 1))
-                self.lineSaleSecondTo.setEnabled(True)
-                self.lineSaleSecondTo.setFocus()
-                self.lineSaleFinalAmount.setText(self.lineSaleSecondFrom.text())
-                self.lineSaleFirstTo.setEnabled(False)
-
-        elif self.sender().objectName() == '2':
-            if value == 0:
-                self.lineSaleSecondFrom.setText('0.00')
-                self.lineSaleSecondTo.setEnabled(False)
-                self.lineSaleSecondTo.setText('0.00')
-            else:
-                if float(self.lineSaleSecondTo.text()) < float(self.lineSaleSecondFrom.text()):
-                    self.warningMessage("Data Error", "The upper limit must be greater than the lower")
-                    self.lineSaleSecondTo.setFocus()
-                    return
-                self.lineSaleThirdFrom.setText(str(float(self.lineSaleSecondTo.text()) + 1))
-                self.lineSaleThirdTo.setEnabled(True)
-                self.lineSaleThirdTo.setFocus()
-                self.lineSaleFinalAmount.setText(self.lineSaleThirdFrom.text())
-                self.lineSaleSecondTo.setEnabled(False)
-
-        elif self.sender().objectName() == '3':
-            if value == 0:
-                self.lineSaleThirdFrom.setText('0.00')
-                self.lineSaleThirdTo.setEnabled(False)
-                self.lineSaleThirdTo.setText('0.00')
-            else:
-                if float(self.lineSaleThirdTo.text()) < float(self.lineSaleThirdFrom.text()):
-                    self.warningMessage("Data Error", "The upper limit must be greater than the lower")
-                    self.lineSaleThirdTo.setFocus()
-                    return
-                self.lineSaleFinalFrom.setText(str(float(self.lineSaleThirdTo.text()) + 1))
-                self.lineSaleThirdTo.setEnabled(False)
-
-
-
-        print('This is spin box: {}  value: '.format(self.sender().objectName()), value)
-        print(value == 0)
-
+        self.spinSaleFirstPercent.setEnabled(True)
+        self.spinSaleBasePercent.setFocus()
 
     @pyqtSlot()
     def saleFirstToChanged(self):
-        self.spinSaleFirstPercent.setEnabled(True)
-        self.spinSaleFirstPercent.setFocus()
+        if float(self.lineSaleFirstTo.text())> 0:
+            self.lineSaleSecondFrom.setText(str(float(self.lineSaleFirstTo.text()) + 1))
+            self.lineSaleSecondTo.setText('0.00')
+            self.lineSaleFinalAmount.setText(self.lineSaleSecondFrom.text())
+            self.lineSaleSecondTo.setEnabled(True)
+            self.spinSaleSecondPercent.setEnabled(True)
+            #self.spinSaleFirstPercent.setFocus()
+            if float(self.lineSaleFirstTo.text()) < float(self.lineSaleFirstFrom.text()):
+                self.warningMessage("Data Error", "The upper limit must be more than {}". format(
+                        self.lineSaleFirstFrom.text()))
+                self.lineSaleFirtTo.setText('0.00')
+                self.lineSaleFirstTo.setFocus()
 
     @pyqtSlot()
     def saleSecondToChanged(self):
-        self.spinSaleSecondPercent.setEnabled(True)
-        self.spinSaleSecondPercent.setFocus()
+        if float(self.lineSaleSecondTo.text()) > 0:
+            self.lineSaleThirdFrom.setText(str(float(self.lineSaleSecondTo.text()) + 1))
+            self.lineSaleThirdTo.setText('0.00')
+            self.lineSaleFinalAmount.setText(self.lineSaleThirdFrom.text())
+            self.lineSaleThirdTo.setEnabled(True)
+            self.spinSaleThirdPercent.setEnabled(True)
+            self.spinSaleSecondPercent.setFocus()
+            if float(self.lineSaleSecondTo.text()) < float(self.lineSaleSecondFrom.text()):
+                self.warningMessage("Data Error", "The upper limit must be more than {}". format(
+                        self.lineSaleSecondFrom.text()))
+                self.lineSaleSecondTo.setText('0.00')
+                self.lineSaleSecondTo.setFocus()
 
     @pyqtSlot()
     def saleThirdToChanged(self):
-        self.spinSaleThirdPercent.setEnabled(True)
-        self.spinSaleThirdPercent.setFocus()
+        if float(self.lineSaleThirdTo.text()) > 0:
+            self.lineSaleFinalAmount.setText(str(float(self.lineSaleThirdTo.text()) + 1))
+            self.spinSaleThirdPercent.setEnabled(True)
+            self.spinSaleThirdPercent.setFocus()
+            if float(self.lineSaleThirdTo.text()) < float(self.lineSaleThirdFrom.text()):
+                self.warningMessage("Data Error", "The upper limit must be more than {}". format(
+                        self.lineSaleThirdFrom.text()))
+                self.lineSaleThirdTo.setText('0.00')
+                self.lineSaleThirdTo.setFocus()
 
-    #@pyqtSlot()
-    #def enableOnSite(self):
-    #    self.checkOnSite.setEnabled(self.radioFee.isChecked())
 
     @pyqtSlot()
     def checkOption(self):
@@ -691,22 +655,18 @@ class Agreement(QDialog):
 
     def supplierChange(self):
         try:
-            row = self.comboSupplier.currentIndex()
-            idx = self.comboSupplier.model().index(row,0)
-            self.supplierId = self.comboSupplier.model().data(idx)
             self.agreementTitle[0] = self.comboSupplier.currentText()
             self.setAgreementTitle()
-            self.okToSave[2] = int(self.supplierId)
+            self.okToSave[2] = self.comboSupplier.getHiddenData(0)
             self.okSaving()
+            self.picker.loadBaseTable()
         except TypeError as err:
             print('supplierChange' + type(err).__name__ + ' ' + err.args[0])
 
     @pyqtSlot()
     def responsibleChanged(self):
         try:
-            row = self.comboResponsible.currentIndex()
-            idx = self.comboResponsible.model().index(row,0)
-            self.responsibleId = self.comboResponsible.model().data(idx)
+            self.responsibleId = self.comboResponsible.getHiddenData(0)
             self.okToSave[3] = int(self.responsibleId)
             self.okSaving()
         except TypeError as err:
@@ -719,7 +679,7 @@ class Agreement(QDialog):
                 self.okToSave[0] = self.lineAgreement.text()
                 self.okSaving()
         except Exception as err:
-            print('setAgreementTitle' + err)
+            print('setAgreementTitle' + err.args)
 
 
     def toggleBreaking(self):
@@ -763,10 +723,11 @@ class Agreement(QDialog):
         if self.isVisible():
             try:
                 idx = self.okToSave.index(None)
-            except ValueError:
-                if self.chooseSize > 0:
-                    self.btnOk.setEnabled(True)
-                    return
+            except ValueError as err:
+                if self.chooseSize is not None:
+                    if self.chooseSize() > 0:
+                        self.btnOk.setEnabled(True)
+                        return
                 self.btnOk.setEnabled(False)
 
     def warningMessage(self, title, message):
@@ -788,13 +749,15 @@ class Agreement(QDialog):
         rewrite = False
         try:
             while True:
+                sett = SettingsDialog()
+                farmData = (sett.farm, sett.farmAddress)
                 answer, size = RequestHandler.handle_request(RequestHandler, self.address, ["NEW_AGREEMENT",
                                                              self.lineAgreement.text(),
                                                              self.comboSupplier.currentText(),
                                                              self.comboResponsible.currentText(),
                                                              self.dateEdit.date().toString('yyyy-MM-dd'),
-                                                             int(self.supplierId),
-                                                             int(self.responsibleId),
+                                                             self.comboSupplier.getHiddenData(0),
+                                                             self.comboResponsible.getHiddenData(0),
                                                              self.checkBreaking.isChecked(),
                                                              self.normalizeFloat(self.lineAmount),
                                                              self.spinInstallments.value(),
@@ -817,7 +780,8 @@ class Agreement(QDialog):
                                                              self.spinSaleFinalPercent.value(),
                                                              self.groupSale.isChecked(),
                                                              rewrite,
-                                                             self.picker.agreementHorses])
+                                                             self.picker.agreementHorses,
+                                                             farmData])
                 if not answer[0]:
                     msgBox = QMessageBox()
                     updateButton = QPushButton("UPDATE")
@@ -857,7 +821,6 @@ class Agreement(QDialog):
             id = answer[2]
             self.agreementId = id
             self.filename = answer[1]
-            #self.picker.saveAgreementHorses(id)
             self.accept()
             return answer[0]
         except ComunicationError as err:

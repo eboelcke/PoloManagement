@@ -3,7 +3,7 @@ from PyQt5.QtSql import QSqlDatabase
 from ext.APM import DataError
 
 
-class Cdatabase(QSqlDatabase):
+class CDatabase(QSqlDatabase):
 
     def __init__(self,db,dbName='cbd', openedConnection = []):
         super().__init__()

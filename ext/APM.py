@@ -7,9 +7,10 @@ from PyQt5.QtGui import (QTextDocument, QTextCursor, QStandardItemModel, QStanda
                          QTextTableCellFormat, QTextCharFormat, QFont, QTextOption, QColor,
                          QFocusEvent, QMouseEvent)
 from PyQt5.QtWidgets import (QTableView, QMessageBox, QHeaderView, QDateEdit, QPushButton, QToolButton,
-                             QLineEdit, QSpinBox, QWidget, QHBoxLayout, QComboBox, QApplication, QLabel)
-from PyQt5.QtCore import Qt, QVariant, pyqtSignal, pyqtSlot, QEvent
-from PyQt5.QtSql import QSqlQueryModel
+                             QLineEdit, QSpinBox, QWidget, QHBoxLayout, QComboBox, QApplication, QLabel,
+                             QPlainTextEdit)
+from PyQt5.QtCore import Qt, QVariant, pyqtSignal, pyqtSlot, QEvent, QObject
+from PyQt5.QtSql import QSqlQueryModel, QSqlDatabase, QSqlQuery
 
 #from PyQt5 import QtGui
 import sys
@@ -27,6 +28,7 @@ OPEN_NEW = 7
 OPEN_EDIT = 8
 OPEN_EDIT_ONE = 9
 OPEN_FILE = 10
+OPEN_DELETE = 14
 DELETE_FILE = 11
 COPY_FILE = 12
 RENAME_FILE = 13
@@ -37,6 +39,9 @@ CONTACT_BREAKER = 32
 CONTACT_BUYER = 33
 CONTACT_DEALER = 34
 CONTACT_ALL = 35
+CONTACT_POLO_PLAYER = 36
+CONTACT_BUSTER = 37
+CONTACT_VETERINARY = 38
 
 HORSE_BREAKING = 40
 HORSE_PLAYING = 41
@@ -46,15 +51,15 @@ REPORT_TYPE_ALL_HORSES = 50
 REPORT_TYPE_ALL_BREAKING_HORSES = 51
 REPORT_TYPE_ALL_PLAYING_HORSES = 52
 
-BRAKE_TYPE_POLO = 0
-BRAKE_TYPE__CRIOLLA = 1
-BRAKE_TYPE_HALFBREAKE = 2
-BRAKE_TYPE_INCOMPLETE = 3
+BRAKE_TYPE_FINAL = 0
+BRAKE_TYPE_HALFBREAKE = 1
+BRAKE_TYPE_INCOMPLETE = 2
 
 BRAKE_RATE_EXCELLENT = 0
-BRAKE_RATE_GOOD = 1
-BRAKE_RATE_FAIR_=2
-BRAKE_RATE_POOR = 3
+BRAKE_RATE_VERY_GOOD = 1
+BRAKE_RATE_GOOD = 2
+BRAKE_RATE_FAIR_=3
+BRAKE_RATE_POOR = 4
 
 MORTALITY_CAUSE_DISEASE = 0
 MORTALITY_CAUSE_ACCIDENT = 1
@@ -72,15 +77,20 @@ REJECTION_CAUSE_DISEASE = 2
 REJECTION_CAUSE_INJURIY = 3
 REJECTION_CAUSE_UNKNOWN = 4
 
-PAYABLES_TYPE_SALE = 0
+PAYABLES_TYPE_DOWNPAYMENT = 0
 PAYABLES_TYPE_BOARD = 1
-PAYABLE_TYPE_OTHER = 2
+PAYABLES_TYPE_FULL_BREAK = 2
+PAYABLES_TYPE_HALF_BREAK = 3
+PAYABLES_TYPE_SALE = 4
+PAYABLES_TYPE_OTHER= 5
+PAYABLES_TYPE_ALL = 7
 
 PAYMENT_MODALITY_AT_END = 0
 PAYMANT_MODALITY_MONTHLY_FEE = 1
 PAYMENT_MODALITY_MONTHLY_ONSITEONLY = 2
 
-
+CURRENCY_USA_DOLAR = 0
+CURRENCY_ARGENTINE_PESO = 1
 
 class Error(Exception):
     pass
@@ -92,8 +102,68 @@ class DataError(Error):
         self.source = source
         self.type = type
 
+class Cdatabase(QSqlDatabase):
+
+    def __init__(self,db,dbName='cbd', openedConnection = []):
+        super().__init__()
+        self.opendConnection = openedConnection
+        self.db = db
+        try:
+            if not QSqlDatabase.contains(dbName) :
+                self.db = self.cloneDatabase(db, dbName)
+        except Exception as err:
+            raise DataError("CDatabase - __init__",  self.lastError().text())
+
+    def __enter__(self):
+        if not self.db.open():
+            raise DataError( "MySQL Connection",
+                                 self.db.lastError().text() + " The program will close now!",
+                             self.db.lastError().type())
+        return self.db
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.db.close()
+
+class FocusPlainTextEdit(QPlainTextEdit):
+    focusOut = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.installEventFilter(self)
+        #self.setFocusPolicy(Qt.StrongFocus)
+
+    def eventFilter(self, obj, event):
+        if type(obj) is FocusPlainTextEdit:
+            if event.type() == QEvent.FocusOut:
+                self.focusOut.emit()
+        return super().eventFilter(obj, event)
+
+class CreateDatabase():
+    def __init__(self, con_string, parent=None):
+        self.con_string = con_string
+
+    def create(self):
+        db = QSqlDatabase.addDatabase("QMYSQL", "Create")
+        db.setUserName(self.con_string['user'])
+        db.setHostName(self.con_string['host'])
+        db.setPassword(self.con_string['password'])
+        ok = db.open()
+        if not ok:
+            raise DataError('create', db.lastError().text())
+        qry = QSqlQuery(db)
+        qry.prepare("CREATE DATABASE IF NOT EXISTS {}".format(self.con_string['database']))
+        #qry.prepare("CREATE DATABASE IF NOT EXISTS ?")
+        #qry.addBindValue(QVariant(self.con_string['database']))
+        qry.exec()
+        if qry.lastError().type() != 0:
+            print(qry.lastError().text())
+            raise DataError('create', qry.lastError().text())
+        return True
+
+
 class ReportPrint():
-    def __init__(self, table,title, centerColumns, colWidths):
+    def __init__(self, table, title, centerColumns, colWidths):
         self.tableView = table
         self.title = title
         self.centerColumns = centerColumns
@@ -188,8 +258,7 @@ class ReportPrint():
                 elif type(rec.value(x)) is QDate:
                     tableCursor.insertText(rec.value(x).toString('MM-dd-yyyy'), charFormat)
                 else:
-                    tableCursor.insertText(rec.value(x), charFormat)
-                tableCursor.movePosition(QTextCursor.NextCell)
+                 tableCursor.movePosition(QTextCursor.NextCell)
                 col +=1
             row += 1
         document.print(printer)
@@ -206,15 +275,16 @@ class QSqlAlignColorQueryModel(QSqlQueryModel):
             ..
             ..
             checkString: (QColor(), QColor())]
-            Where   colNumber is the coloumn number to be checked.
+            Where   colNumber is the column number to be checked.
                     checkString is the string to be match in the above column.
                     QColor(b) is the color to assigned to the background.
                     QColor(t) is the color to be aliened to the text.
             """
 
-    def __init__(self, centerColumns, colorDict):
+    def __init__(self, centerColumns, rightColumns, colorDict):
         super().__init__()
         self.centerColumns = centerColumns
+        self.rightColumns = rightColumns
         self.colorDict = colorDict
 
     def data(self, idx, role=Qt.DisplayRole):
@@ -225,10 +295,14 @@ class QSqlAlignColorQueryModel(QSqlQueryModel):
             if self.query().seek(idx.row()):
                 qry = self.query().record()
                 if role == Qt.DisplayRole:
+                    if isinstance(qry.value(idx.column()),float):
+                        return QVariant('{:.2f}'.format(round(qry.value(idx.column()), 2)))
                     return QVariant(qry.value(idx.column()))
                 if role == Qt.TextAlignmentRole:
                     if idx.column() in self.centerColumns:
                         return QVariant(Qt.AlignHCenter)
+                    elif idx.column() in self.rightColumns:
+                        return QVariant(Qt.AlignRight)
                     return QVariant(Qt.AlignLeft)
                 if role == Qt.TextColorRole:
                     try:
@@ -241,7 +315,7 @@ class QSqlAlignColorQueryModel(QSqlQueryModel):
                     except KeyError:
                         return
         except Exception as err:
-            print(type(err.__name__), err.args)
+            print(type(err).__name__, err.args)
 
     def findIdItem(self, id, fieldNumber):
         self.query().seek(-1)
@@ -262,7 +336,7 @@ class TableViewAndModel(QTableView):
         colDict: Dictionary {colNb: (str colName,
                                      bool colHidden,
                                      bool QHeaderView,
-                                     bool colCentered - default rightAlign
+                                     int colCentered - (1:center; 2 right;0 default leftAlign
                                      int/None printWidth)}
         size: (height int, width int) Size of the table
 
@@ -279,12 +353,10 @@ class TableViewAndModel(QTableView):
 
     def setTable(self):
         try:
-            if self.qry.size() < 0:
-                return
-            self.qry.first()
             fields = self.qry.record().count()
-            centerColumns = [x for x in range(fields) if self.colDict[x][3]]
-            model = QSqlAlignColorQueryModel(centerColumns, self.colorDict)
+            centerColumns = [x for x in range(fields) if self.colDict[x][3]== 1]
+            rightColumns = [x for x in range(fields) if self.colDict[x][3]== 2]
+            model = QSqlAlignColorQueryModel(centerColumns, rightColumns, self.colorDict)
             model.setQuery(self.qry)
             [model.setHeaderData(x, Qt.Horizontal, self.colDict[x][0]) for x in range(fields)]
             self.setModel(model)
@@ -480,6 +552,7 @@ class NullDateEdit(QWidget):
 
     def enableSave(self):
         self.parent.enableSave()
+        self.dateChanged.emit(self)
 
     @property
     def minimumDate(self):
@@ -507,10 +580,6 @@ class NullDateEdit(QWidget):
         if date.isNull():
             date = self.minimumDate
         self.dateEdit.setDate(date)
-
-
-
-
 
 class FocusCombo(QComboBox):
     """Subclass of QComboBox that allows to :
@@ -542,7 +611,6 @@ class FocusCombo(QComboBox):
         return super(FocusCombo, self).eventFilter(obj,event)
 
     def mouseDoubleClickEvent(self,event):
-        print("double click detected")
         self.doubleClicked.emit(self)
         super(FocusCombo, self).mouseDoubleClickEvent(event)
 
@@ -579,6 +647,45 @@ class FocusCombo(QComboBox):
         idx = self.findData(data, Qt.DisplayRole, Qt.MatchExactly)
         self.setCurrentIndex(idx)
         self.setModelColumn(col)
+        return idx
+
+    def getHiddenData(self, column):
+        """Function to retrieve data from not visible columns
+        Input: int: column
+        Output str: data"""
+        col = self.modelColumn()
+        self.setModelColumn(column)
+        if self.currentText().isdigit():
+            val = int(self.currentText())
+        else:
+            val = self.currentText()
+        self.setModelColumn(col)
+        return val
+
+class SQL_Query(QSqlQuery):
+    """Subclass QSqlQuery adding the method seekData providing a way to
+    find the first record where the search value is locates
+    Data:
+        data : value to be search for (str|int|date|decimal)
+        column: field where to look for (int)"""
+
+    def __init__(self, db):
+        super().__init__(db)
+
+
+    def seekData(self, data, column):
+        try:
+            self.seek(-1)
+            while self.next():
+                if self.value(column) == data:
+                    return True
+            return False
+
+        except DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print('seekData', type(err).__name__, err.args)
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

@@ -8,8 +8,8 @@ from PyQt5.QtGui import QStandardItemModel, QColor, QFont, QDoubleValidator
 from PyQt5.QtSql import QSqlQuery, QSqlQueryModel, QSqlDriver
 from ext.Settings import SettingsDialog
 from ext import APM
-from ext.APM import FocusCombo, QSqlAlignColorQueryModel, PercentOrAmountLineEdit
-from ext.CQSqlDatabase import Cdatabase
+from ext.APM import FocusCombo, QSqlAlignColorQueryModel, PercentOrAmountLineEdit, Cdatabase
+#from ext.CQSqlDatabase import Cdatabase
 import pymysql
 from configparser import ConfigParser
 
@@ -104,27 +104,26 @@ class Horses(QDialog):
         self.setModal(True)
         self.horseid = horseid
         self.mode = mode
-        #self.horseOkSave = False
-        #self.agreeOkSave = False
         self.setUI()
 
     def setUI(self):
         self.setMinimumWidth(600)
+        self.setMaximumWidth(700)
         lblName = QLabel("Name")
         self.lineName = QLineEdit()
         self.lineName.setToolTip("Horse Name")
         self.lineName.editingFinished.connect(self.enableSave)
 
         lblSex = QLabel("Sex")
-        self.comboSex = QComboBox(self)
+        self.comboSex = FocusCombo()
         self.comboSex.setToolTip("Horse Sex")
-        self.comboSex.setMinimumWidth(200)
+        self.comboSex.setMaximumWidth(200)
         self.comboSex.activated.connect(self.enableSave)
 
         lblcoat = QLabel("Coat")
-        self.comboCoat = QComboBox()
+        self.comboCoat = FocusCombo()
         self.comboCoat.setToolTip("Horse Coat")
-        self.comboCoat.setMinimumWidth(200)
+        self.comboCoat.setMaximumWidth(200)
         self.comboCoat.activated.connect(self.enableSave)
 
         self.loadCombos()
@@ -132,7 +131,7 @@ class Horses(QDialog):
         lblBreaker = QLabel("Breaker")
         self.comboBreaker = FocusCombo()
         self.comboBreaker.setToolTip("Horse breaker")
-        self.comboBreaker.setMinimumWidth(200)
+        self.comboBreaker.setMaximumWidth(200)
         self.comboBreaker.setEnabled(False)
         self.comboBreaker.activated.connect(self.enableSave)
         self.comboBreaker.setObjectName('Breaker')
@@ -141,11 +140,19 @@ class Horses(QDialog):
         lblPlayer = QLabel("Player")
         self.comboPlayer = FocusCombo()
         self.comboPlayer.setToolTip("Horse player")
-        self.comboPlayer.setMinimumWidth(200)
+        self.comboPlayer.setMaximumWidth(200)
         self.comboPlayer.setEnabled(False)
         self.comboPlayer.activated.connect(self.enableSave)
         self.comboPlayer.setObjectName('Player')
         self.comboPlayer.doubleClicked.connect(self.addPlayer)
+
+        lblLocation = QLabel('Location')
+        self.comboLocation = FocusCombo(self)
+        self.comboLocation.setMaximumWidth(200)
+        self.comboLocation.setModel(QSqlQueryModel())
+        self.comboLocation.model().setQuery(self.getLocations())
+        self.comboLocation.setModelColumn(1)
+        self.comboLocation.seekData(0,2)
 
         lblRp = QLabel("RP")
         self.lineRp = QLineEdit()
@@ -247,21 +254,24 @@ class Horses(QDialog):
             gLayout.addWidget(lblPlayer, 3,2)
             gLayout.addWidget(self.comboPlayer, 3,3)
             gLayout.addLayout(hLayoutCheck, 4, 1)
-            gLayout.addLayout(hLayoutAccessId, 4, 3)
+            gLayout.addWidget(lblLocation,4,2)
+            gLayout.addWidget(self.comboLocation,4,3)
             self.loadEditCombos()
         else:
-            gLayout.addLayout(hLayoutAccessId,3,0)
-            gLayout.addLayout(hLayoutCheck, 3, 2)
+            gLayout.addLayout(hLayoutCheck, 3, 1)
+            gLayout.addWidget(lblLocation,3,2)
+            gLayout.addWidget(self.comboLocation,3,3)
         vLayout.addLayout(gLayout)
-        centerColumns = [2, 4, 6, 7]
-        colorDict = {}
-        self.tableHorses = QTableView()
-        self.tableHorses.verticalHeader().setVisible(False)
-        self.modelHorses = APM.QSqlAlignColorQueryModel(centerColumns, colorDict)
-        qry = self.getHorsesQuery()
-        self.modelHorses.setQuery(qry)
+
         if self.mode == APM.OPEN_EDIT:
             try:
+                centerColumns = [2, 4, 6, 7]
+                colorDict = {}
+                self.tableHorses = QTableView()
+                self.tableHorses.verticalHeader().setVisible(False)
+                self.modelHorses = APM.QSqlAlignColorQueryModel(centerColumns, colorDict)
+                qry = self.getHorsesQuery()
+                self.modelHorses.setQuery(qry)
                 self.modelHorses.setHeaderData(0,Qt.Horizontal,"ID")
                 self.modelHorses.setHeaderData(1, Qt.Horizontal, "Name")
                 self.modelHorses.setHeaderData(2, Qt.Horizontal, "RP")
@@ -296,6 +306,7 @@ class Horses(QDialog):
                 self.tableHorses.hideColumn(13)
                 self.tableHorses.hideColumn(14)
                 self.tableHorses.hideColumn(15)
+                self.tableHorses.hideColumn(16)
                 self.tableHorses.doubleClicked.connect(self.getHorseData)
                 vLayout.addWidget(self.tableHorses)
                 self.setWindowTitle("Edit Horse")
@@ -311,6 +322,19 @@ class Horses(QDialog):
             self.tableHorses.setFocus()
         else:
             self.lineName.setFocus()
+
+    def getLocations(self):
+        try:
+            with Cdatabase(self.cdb, 'getLocations') as db:
+                qry = QSqlQuery(db)
+                qry.exec("SELECT id, name ,contactid FROM locations WHERE active")
+                if qry.lastError().type()!= 0:
+                    raise APM.DataError('getLocations', qry.lastError().text())
+                return qry
+        except APM.DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print('getLocations', err.args)
 
     @pyqtSlot()
     def deleteHorse(self):
@@ -367,6 +391,8 @@ class Horses(QDialog):
         row = self.tableHorses.currentIndex().row()
         self.modelHorses.query().seek(row)
         record = self.modelHorses.query().record()
+        if self.mode == APM.OPEN_EDIT_ONE:
+            qry = self.getOneRecord()
         self.record = record
         try:
             res = QMessageBox.question(self,"Edit Horse", "Do you want to edit {}´data.\n Check data and edit it "
@@ -377,6 +403,7 @@ class Horses(QDialog):
                 self.lineRp.clear()
                 self.lineHorseBaseId.clear()
                 self.comboSex.setCurrentIndex(-1)
+                self.comboLocation.seekData(0,2)
                 self.comboCoat.setCurrentIndex(-1)
                 self.checkBroke.setChecked(False)
                 self.checkActive.setChecked(True)
@@ -389,6 +416,7 @@ class Horses(QDialog):
             self.lineRp.setText(record.value(2))
             self.date.setDate(record.value(3))
             self.dateDos.setDate(record.value(14))
+            self.comboSex.seekData(record.value(9),0)
             self.comboSex.setModelColumn(0)
             sdx = self.comboSex.findData(QVariant(record.value(9)), Qt.DisplayRole)
             self.comboSex.setModelColumn(1)
@@ -397,6 +425,7 @@ class Horses(QDialog):
             cdx = self.comboCoat.findData(QVariant(record.value(10)), Qt.DisplayRole)
             self.comboCoat.setModelColumn(1)
             self.comboCoat.setCurrentIndex(cdx)
+            self.comboLocation.seekData(record.value(16), Qt.DisplayRole)
             self.checkBroke.setChecked(True if record.value(6) == u'\u2714' else False)
             self.checkActive.setChecked(True if record.value(7) == u'\u2714' else False)
             self.lineHorseBaseId.setText(str(record.value(8)) if record.value(8) > 0 else None)
@@ -425,6 +454,48 @@ class Horses(QDialog):
         except Exception as err:
             print(type(err).__name__, err.args)
 
+    def getOneRecord(self):
+        try:
+            with Cdatabase(self.cdb, 'getOneRecord') as db:
+                qry = QSqlQuery(db)
+                qry.prepare("""SELECT
+                     h.id, h.name, h.rp, h.dob,
+                     CASE
+                        WHEN h.sexid = 1 THEN _ucs2 X'2642'
+                        WHEN h.sexid = 2 THEN _ucs2 X'2640'
+                        WHEN h.sexid = 3 THEN _ucs2 X'265E'
+                     END Sex,
+                     c.coat,
+                     IF (h.isbroke = 1, _ucs2 X'2714', '') AS Broke, 
+                     IF (a.active = 1, _ucs2 X'2714','') AS Active,
+                     h.horsebaseid,
+                     h.sexid,
+                     h.coatid,
+                     a.playerid,
+                     a.breakerid,
+                     a.agreementid,
+                     a.dos,
+                     a.id AS agrid,
+                     h.locationid
+                    FROM horses as h 
+                     INNER JOIN agreementhorses as a
+                     ON h.id = a.horseid
+                     INNER JOIN coats as c
+                     ON h.coatid = c.id
+                    WHERE h.active = 1
+                    AND h.id = ?
+                """)
+                qry.addBindValue(QVariant(self.horseid))
+                qry.exec()
+                if qry.lastError().type() != 0:
+                    raise APM.DataError('getOneRecord', qry.lastError().text())
+                qry.first()
+                return qry.record()
+
+
+        except APM.DataError as err:
+            print(err.source, err.message)
+
     def getHorsesQuery(self):
         with Cdatabase(self.cdb, 'query') as db:
             qry = QSqlQuery(db)
@@ -445,7 +516,8 @@ class Horses(QDialog):
                      a.breakerid,
                      a.agreementid,
                      a.dos,
-                     a.id AS agrid
+                     a.id AS agrid,
+                     h.locationid
                     FROM horses as h 
                      INNER JOIN agreementhorses as a
                      ON h.id = a.horseid
@@ -500,8 +572,10 @@ class Horses(QDialog):
 
     def loadHorse(self):
         try:
-            record = self.modelHorses.findIdItem(self.horseid, 15)
-            # ++++++++++++++++++++++++++
+            if self.mode == APM.OPEN_EDIT_ONE:
+                record = self.getOneRecord()
+            else:
+                record = self.modelHorses.findIdItem(self.horseid, 15)
             self.setWindowTitle("Edit '{}'".format(record.value(1)))
             self.lineName.setText(record.value(1))
             self.lineRp.setText(record.value(2))
@@ -572,8 +646,9 @@ class Horses(QDialog):
                         coatid,
                         isbroke,
                         dob,
-                        rp)
-                        VALUES (?, ?, ?, ?, ?, ?, ? )""")
+                        rp,
+                        locationid)
+                        VALUES (?, ?, ?, ?, ?, ?, ?,? )""")
                 else:
                     qry.prepare("""
                         UPDATE horses as h INNER JOIN agreementhorses as a
@@ -585,6 +660,7 @@ class Horses(QDialog):
                         h.isbroke = ?, 
                         h.dob = ?, 
                         h.rp = ?,
+                        h.locationid = ?
                         a.dos = ?,
                         a.breakerid = ?,
                         a.playerid = ?,
@@ -606,6 +682,7 @@ class Horses(QDialog):
                 qry.addBindValue(QVariant(self.checkBroke.isChecked()))
                 qry.addBindValue(QVariant(dob))
                 qry.addBindValue(QVariant(self.lineRp.text()))
+                qry.addBindValue(QVariant(self.comboLocation.getHiddenData(0)))
                 if self.mode == APM.OPEN_EDIT or self.mode == APM.OPEN_EDIT_ONE:
                     dos = None if self.dateDos.text == 'None' else self.dateDos.date.toString("yyyy-MM-dd")
                     qry.addBindValue(QVariant(dos))
@@ -2126,7 +2203,7 @@ class Sales(QDialog):
                     sql_horses = """ UPDATE horses 
                           SET active = False
                           WHERE id = %s"""
-                    cur.execute(sql_horses, (horseId,))
+                    cur.execute(sql_horses, [horseId])
                     horseUpdate = cur.rowcount
                     sql_agreementhorses = """ UPDATE agreementhorses
                           SET active = False 
@@ -2135,12 +2212,13 @@ class Sales(QDialog):
 
                     """ include accountsPayable insert query"""
                     sql_payables = """INSERT INTO payables 
-                    (dot, concept, amount, saleid, typeid)
-                    VALUES(%s, %s, %s, %s, %s)"""
+                    (agreementhorseid, concept, amount, ticketid, typeid)
+                    VALUES( %s, %s, %s, %s, %s)"""
                     concept = "Player share {}% on ${} {} net sale".format(
                                 self.sharePercent * 100, float(self.linePrice.text())
                                                          - self.saleExpenses,self.record.value(1))
-                    parameters = [self.dateOfSale.date.toString("yyyy-MM-dd"), concept,
+                    parameters = [self.record.value(1),
+                        concept,
                         float(self.lineSharePrice.text()),
                         saleid,
                         APM.PAYABLES_TYPE_SALE]
@@ -2148,10 +2226,10 @@ class Sales(QDialog):
                     """It checks for active horses in agreementhorses for this particular
                                     agreement and if it does'nt find any desactivate - active = False - the agreement"""
                     sql_check_Agreement = """
-                                                    UPDATE agreements AS a
+                                                    UPDATE agreements  a
                                                     SET active = False,
                                                     deactivationdate = %s 
-                                                    WHERE NOT EXISTS (SELECT ah.id FROM agreementHorses AS ah 
+                                                    WHERE NOT EXISTS (SELECT ah.id FROM agreementHorses  ah 
                                                                         WHERE ah.active AND ah.agreementid = a.id)
                                                     AND a.id = %s"""
                     parameters = [self.dateOfSale.date.toString("yyyy-MM-dd"), self.agreementId]
@@ -2159,16 +2237,16 @@ class Sales(QDialog):
                 else:
                     sql_update_payables = """
                     UPDATE payables 
-                    SET dot = %s, concept = %s, amount = %s
-                    WHERE saleid = %s"""
+                    SET concept = %s, amount = %s
+                    WHERE 
+                    typeid = 2
+                    AND ticketid = %s"""
                     concept = "Player share {}% on ${} {} net sale".format(
                         self.sharePercent * 100, float(self.linePrice.text()) - self.saleExpenses,self.record.value(2))
-                    parameters = [self.dateOfSale.date.toString("yyyy-MM-dd"),
-                                  concept,
+                    parameters = [concept,
                                   float(self.lineSharePrice.text()),
                                   saleid]
                     cur.execute(sql_update_payables, parameters)
-
 
                 cnn.commit()
                 """Resets the sale list for this particular agreement on           
@@ -2709,6 +2787,7 @@ class Reject(QDialog):
             print(type(err).__name__, err.args)
             cnn.rollback()
         finally:
+            cnn.close()
             self.comboRejector.setModelColumn(1)
             self.comboCause.setModelColumn(1)
             self.comboType.setModelColumn(1)

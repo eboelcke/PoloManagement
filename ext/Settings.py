@@ -3,10 +3,11 @@ import os
 
 from PyQt5.QtWidgets import (QGroupBox, QDialog, QHBoxLayout, QVBoxLayout,QFormLayout, QLabel, QLineEdit, QComboBox,
                              QPushButton, QApplication, QFileDialog, QMessageBox, QFrame, QPlainTextEdit)
-from PyQt5.QtCore import Qt, QSettings, QCoreApplication, pyqtSlot
-from PyQt5.QtSql import QSqlDatabase
+from PyQt5.QtCore import Qt, QSettings, QCoreApplication, pyqtSlot, QVariant
+from PyQt5.QtSql import QSqlDatabase, QSqlQuery
 from configparser import ConfigParser
 from ext.socketclient import RequestHandler
+from ext.APM import DataError, Cdatabase, FocusPlainTextEdit, CreateDatabase
 import resources
 
 
@@ -22,6 +23,8 @@ class SettingsDialog(QDialog):
         self.serverOk = False
         self.databaseOk = False
         self.okToSave = [self.serverOk, self.databaseOk]
+        self.farmDirty = False
+        self.ownerDirty = False
         self.setModal(True)
 
 
@@ -44,14 +47,18 @@ class SettingsDialog(QDialog):
 
         lblOwner = QLabel("Owner")
         self.lineOwner = QLineEdit()
+        self.lineOwner.editingFinished.connect(self.dirtyOwner)
 
         lblAddress = QLabel("Address")
         self.textAddress = QPlainTextEdit()
 
         lblFarm = QLabel("Farm")
         self.lineFarm = QLineEdit()
+        self.lineFarm.editingFinished.connect(self.dirtyFarm)
+
         lblFarmAddress = QLabel("Farm Address")
-        self.textFarmAddress = QPlainTextEdit()
+        self.textFarmAddress = FocusPlainTextEdit()
+        self.textFarmAddress.focusOut.connect(self.dirtyFarm)
 
 
         self.lblServerTestResult = QLabel('Untested')
@@ -309,9 +316,14 @@ class SettingsDialog(QDialog):
                 sett.setValue("owner/FarmName", self.lineFarm.text())
                 sett.setValue("owner/FarmAddress", self.textFarmAddress.toPlainText())
 
+                if self.farmDirty:
+                    self.farmChanged()
+
+                if self.ownerDirty:
+                    self.ownerChanged()
 
             except Exception as err:
-                print(tyoe(err).__name__, err.args)
+                print('saveAndClose',type(err).__name__, err.args)
             self.accept()
 
     def close(self):
@@ -367,11 +379,43 @@ class SettingsDialog(QDialog):
                 self.okToSave[0]= self.databaseOk
                 self.checkBtnEnabled()
             else:
+                if db.lastError().type() == 1:
+                    if db.lastError().databaseText() == "Unknown database '{}'". format(self.con_string['database']):
+
+                        res = QMessageBox.question(self, "Database Error",
+                                               "Database {} doesn't exist. Do you want to create it?".format(
+                                                   self.con_string['database'], QMessageBox.Yes|QMessageBox.No))
+                        if res == QMessageBox.Yes:
+                            #implement a module to create database open with host, user and password"
+                            res = CreateDatabase(self.con_string, self)
+                            ans = res.create()
+                            if ans:
+                                self.lblTestResult.setStyleSheet("QLabel{background-color: black; color: white}")
+                                self.lblTestResult.setText('Database created')
+                                self.connectionTest()
+                            return
+                    elif db.lastError().databaseText() == "Can't connect to MySQL server on '{}' (10060)".format(
+                        self.con_string['host']):
+                        res = QMessageBox.warning(self,"Connection Error", "The server '{}' is not available".format(
+                        self.con_string['host']), QMessageBox.Ok)
+                        raise DataError("connectionTest", db.lastError().text())
+
                 self.lblTestResult.setStyleSheet("QLabel{background-color: red; color: white}")
                 raise TypeError("MySql is closed")
             self.lblTestResult.setText(testMessage)
+        except DataError as err:
+            self.lblTestResult.setStyleSheet("QLabel{background-color: red; color: white}")
+            self.lblTestResult.setText('Could not create')
+            pop = QMessageBox()
+            pop.setText("Connection to MYSQL failed")
+            pop.setDetailedText(err.source + ',' + err.message)
+            pop.show()
+            pop.exec_()
+            return False, None
+
         except Exception as err:
-            self.lblTestResult.setText(err.args[0])
+            self.lblTestResult.setStyleSheet("QLabel{background-color: red; color: white}")
+            self.lblTestResult.setText('Connection failed')
             pop = QMessageBox()
             pop.setText("Connection to MYSQL failed")
             pop.setDetailedText(db.lastError().text())
@@ -400,6 +444,104 @@ class SettingsDialog(QDialog):
         if self.okToSave.count(True) == 2:
             self.btnOk.setEnabled(True)
             self.btnContinue.setEnabled(True)
+
+    @pyqtSlot()
+    def dirtyFarm(self):
+        self.farmDirty = True
+
+    @pyqtSlot()
+    def dirtyOwner(self):
+        self.ownerDirty = True
+
+    def ownerChanged(self):
+        if self.connectionTest()[0]:
+            setDb = self.connectionTest()[1]
+        try:
+            with Cdatabase(setDb, 'ownerChanged') as db:
+                qry = QSqlQuery(db)
+                #Checks if the owner already exits in contacts database as representative
+                qry.prepare("""SELECT id, fullname, responsible, active 
+                FROM contacts  
+                WHERE fullname = ? """)
+                qry.addBindValue(QVariant(self.lineOwner.text()))
+                qry.exec()
+                if qry.lastError().type() != 0:
+                    raise DataError('ownerChanged', qry.lastError().text())
+                if qry.size() > 0:
+                    qry.first()
+                    if not qry.value(2) or not qry.value(3):
+                        qryUpdate = QSqlQuery(db)
+                        qryUpdate.prepare("""UPDATE contacts 
+                        SET responsible = True, active = True 
+                        WHERE id = ? """)
+                        qryUpdate.addBindValue(QVariant(qry.value(0)))
+                        if qryUpdate.lastError().type() != 0:
+                            raise DataError('ownerChanged-qryUpdate', qryUpdate.lastError().text())
+                else:
+                    qryInsert = QSqlQuery(db)
+                    qryInsert.prepare("""INSERT INTO contacts 
+                    (fullname, responsible, active) 
+                    VALUES(?, ?, ?)""")
+                    qryInsert.addBindValue(QVariant(self.lineOwner.text()))
+                    qryInsert.addBindValue(QVariant(True))
+                    qryInsert.addBindValue(QVariant(True))
+                    qryInsert.exec()
+                    if qryInsert.lastError().type() != 0:
+                        raise DataError('ownerChanged-qryInsert', qryInsert.lastError().text())
+        except DataError as err:
+            print(err.source, err.message)
+
+    def farmChanged(self):
+        if self.connectionTest()[0]:
+            setDb = self.connectionTest()[1]
+        try:
+            with Cdatabase(setDb, 'farmChanged') as db:
+                qry = QSqlQuery(db)
+
+                qry.prepare("""SELECT id, name , address 
+                FROM locations 
+                WHERE active 
+                AND name = ? """)
+                qry.addBindValue(QVariant(self.lineFarm.text()))
+                qry.exec()
+                if qry.lastError().type() != 0:
+                    raise DataError("farmChanged", qry.lastError().text())
+                if qry.size()>0:
+                    #This Farm already exists
+                    qry.first()
+                    if qry.value(2) != self.textFarmAddress.toPlainText():
+                        qryUpdate = QSqlQuery(db)
+                        qryUpdate.prepare("""UPDATE locations 
+                        SET address = ? 
+                        WHERE id = ?""")
+                        qryUpdate.addBindValue(QVariant(self.textFarmAddress.toPlainText()))
+                        qryUpdate.addBindValue(QVariant(qry.value(0)))
+                        qryUpdate.exec()
+                        if qry.lastError().type() != 0:
+                            raise DataError("farmChanged-Update", qry.lastError().text())
+                else:
+                    # Set inactive all farm addresses that may previously exists.
+                    qryInactive = QSqlQuery(db)
+                    qry.exec("""UPDATE locations 
+                    SET active = False 
+                    WHERE contactid = 0""")
+                    if qry.lastError().type() != 0:
+                        raise DataError("farmChanged-Insert", qry.lastError().text())
+                    #Insert the new farm name and address
+                    qryInsert = QSqlQuery(db)
+                    qryInsert.prepare(""" INSERT INTO locations 
+                    (name, contactid, address, main, active) 
+                    VALUES (?, ?, ?, ?, ?""")
+                    qryInsert.addBindValue(QVariant(self.lineFarm.text()))
+                    qryInsert.addBindValue(QVariant(0))
+                    qryInsert.addBindValue(QVariant(self.textFarmAddress.toPlainText()))
+                    qryInsert.addBindValue(QVariant(True))
+                    qryInsert.addBindValue(QVariant(True))
+                    qryInsert.exec()
+                    if qry.lastError().type() != 0:
+                        raise DataError("farmChanged-Insert", qry.lastError().text())
+        except DataError as err:
+            print(err.source, err.message)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

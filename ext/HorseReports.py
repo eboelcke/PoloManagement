@@ -6,10 +6,11 @@ from PyQt5.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt5.QtCore import Qt, QVariant
 from PyQt5.QtGui import QColor, QTextLength
 from PyQt5.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
-from ext.CQSqlDatabase import Cdatabase
+#from ext.CQSqlDatabase import Cdatabase
 from ext.APM import DataError, ReportPrint, QSqlAlignColorQueryModel
 from ext.Horses import QSqlAlignQueryModel
 from ext import APM
+from ext.APM import Cdatabase
 
 
 
@@ -203,7 +204,7 @@ class AvailableHorses(QDialog):
             if qry.size() < 1:
                 raise DataError('setAllHorsesTable', qry.lastError().text())
             self.centerColumns = [1, 4, 5, 7, 9]
-            allHorsesModel = QSqlAlignColorQueryModel(self.centerColumns,colorDict)
+            allHorsesModel = QSqlAlignColorQueryModel(self.centerColumns,[],colorDict)
             allHorsesModel.setQuery(qry)
             allHorsesModel.setHeaderData(1,Qt.Horizontal,"RP")
             allHorsesModel.setHeaderData(2, Qt.Horizontal, "Name")

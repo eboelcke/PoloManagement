@@ -3,12 +3,10 @@ import os
 import traceback
 from struct import Struct
 
-from PyQt5.QtCore import (QVariant, Qt, pyqtSlot, QItemSelectionModel, QDir,QSize,
-                          QItemSelection, QModelIndex, QAbstractItemModel, QCoreApplication,
-                          QPoint, QSettings, pyqtSlot, QAbstractTableModel)
+from PyQt5.QtCore import (QVariant, Qt, QDir, QModelIndex,QPoint, QSettings, pyqtSlot,
+                            QCoreApplication)
 from PyQt5.QtGui import QColor
 from PyQt5.QtSql import (QSqlDatabase,QSqlQueryModel, QSqlQuery)
-#from PyQt5.QtSql import QSqlQueryModel,QSqlQuery , QSqlTableModel, QSqlError
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTableView, QAction, QFileSystemModel,
             QDockWidget, QAbstractItemView, QTreeView,  QTextEdit, QDialog,
@@ -18,11 +16,13 @@ from PyQt5.QtGui import (QFont, QIcon, QTextListFormat, QTextCharFormat,
 from PyQt5.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
 
 from ext import Settings, pushdate, find, wordcount, table, newAgreement, APM
-from ext.APM import TableViewAndModel, DataError
+from ext.transfers import Transfer, EditTransfer
+from ext.APM import TableViewAndModel, DataError, Cdatabase
 from ext.Horses import Horses, StartHorse, Mortality, Reject, Sales
 from ext.HorseReports import AvailableHorses
-from ext.CQSqlDatabase import Cdatabase
-from ext.Contacts import Contacts, ShowContacts
+#from ext.CQSqlDatabase import Cdatabase
+from ext.Contacts import (Contacts, ShowContacts, ChooseActiveSupplier, Supplier, Location)
+
 from ext.BrokeReceive import ReceiveBroken
 import PoloResource
 
@@ -44,11 +44,15 @@ class MainWindow(QMainWindow):
         self.con_string = {}
         self.agreementsPath = None
         self.agreementId = None
+        self.supplierId = None
+        self.player = None
+        self.buster = None
+        self._supplier = None
         if not self.check_connection():
             sys.exit()
         self.initUI()
-        self.qdb.open()
-
+        if  not self.qdb.isOpen():
+            self.qdb.open()
 
     def check_connection(self):
         res = QDialog.Rejected
@@ -91,10 +95,12 @@ class MainWindow(QMainWindow):
                                "color: white}")
         self.setCentralWidget(self.text)
         self.initToolBar()
+        self.initStartBar()
+        self.initPeopleBar()
+        self.initDocumentBar()
         self.initFormatBar()
         self.initAccountBar()
         self.initHorseBar()
-        self.initPeopleBar()
         self.initMenuBar()
         self.statusBar = self.statusBar()
 
@@ -114,7 +120,6 @@ class MainWindow(QMainWindow):
         self.tableInvoices.setModel(self.modelInvoice)
         self.tableInvoices.verticalHeader().setVisible(False)
         self.tableInvoices.verticalHeader().setDefaultSectionSize(25)
-
 
         self.InvoiceSelectionModel = self.tableInvoices.selectionModel()
         self.InvoiceSelectionModel.currentChanged.connect(self.on_current_change)
@@ -157,7 +162,6 @@ class MainWindow(QMainWindow):
 
         self.addDockWidget(Qt.RightDockWidgetArea, self.dockAgreementHorses)
         self.dockAgreementHorses.setStyleSheet("QDockWidget.windowTitle { font-size: 8pt; text-align: left;}")
-
 
         self.dockAccount = QDockWidget("Account", self)
         self.dockAccount.setObjectName("dockAccount")
@@ -208,7 +212,6 @@ class MainWindow(QMainWindow):
         self.tableSales.verticalHeader().setDefaultSectionSize(25)
         self.tableSales.setMinimumHeight(100)
 
-        #self.dockSales.setWidget(self.tableSales)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dockSales)
 
         self.dockMortality = QDockWidget("Mortality", self)
@@ -217,7 +220,6 @@ class MainWindow(QMainWindow):
         self.dockMortality.visibilityChanged.connect(lambda: self.checkDock(
             self.mortalityDockAction, self.dockMortality))
         self.dockMortality.setMinimumWidth(400)
-
         self.addDockWidget(Qt.RightDockWidgetArea, self.dockMortality)
 
         self.dockRejection = QDockWidget("Rejection", self)
@@ -244,10 +246,10 @@ class MainWindow(QMainWindow):
         if self.qdb.isOpen():
             self.qdb.close()
 
-
     def initToolBar(self):
         self.toolBar = self.addToolBar("Options")
         self.toolBar.setObjectName('Options')
+
         self.newAction = QAction(QIcon(":Icons8/File/addfile.png"), "New", self)
         self.newAction.setStatusTip("Create a new document from scratch.")
         self.newAction.setShortcut("Ctrl+N")
@@ -275,7 +277,26 @@ class MainWindow(QMainWindow):
         self.closeAction.setShortcut("Ctrl + C")
         self.closeAction.triggered.connect(self.closeFile)
 
+        self.toolBar.addAction(self.newAction)
+        self.toolBar.addAction(self.openAction)
+        self.toolBar.addAction(self.saveAction)
+        self.toolBar.addSeparator()
 
+    def initStartBar(self):
+        self.startBar = self.addToolBar('Start')
+        self.startBar.setObjectName("StartBar")
+
+        self.openSupplierAction = QAction(QIcon(":/Icons8/Suppliers/coach.png"), "Open Supplier", self)
+        self.openSupplierAction.triggered.connect(self.chooseSupplier)
+
+        self.addHorseAction = QAction(QIcon(":/Icons8/Horses/newhorse.png"), "Increase Horse Inventory", self)
+        self.addHorseAction.setStatusTip("Update available Inventory")
+        self.addHorseAction.triggered.connect(lambda: self.updateHorseInventory(APM.OPEN_NEW))
+
+        self.startBar.addAction(self.openSupplierAction)
+        self.startBar.addAction(self.addHorseAction)
+
+    def initDocumentBar(self):
         self.printAction = QAction(QIcon("icons/print.png"), 'Print', self)
         self.printAction.setStatusTip("Print document.")
         self.printAction.setShortcut("Ctrl+P")
@@ -316,7 +337,7 @@ class MainWindow(QMainWindow):
         self.bulletAction.setShortcut("Ctrl*B")
         self.bulletAction.triggered.connect(self.bulletList)
 
-        self.numberedAction = QAction(QIcon("icons/number.png"),"Numbered list", self)
+        self.numberedAction = QAction(QIcon("icons/number.png"), "Numbered list", self)
         self.numberedAction.setStatusTip("Insert a numbered list")
         self.numberedAction.setShortcut("Ctrl+L")
         self.numberedAction.triggered.connect(self.numberedList)
@@ -326,7 +347,7 @@ class MainWindow(QMainWindow):
         self.quitAction.statusTip = "Exits the application"
         self.quitAction.triggered.connect(self.close)
 
-        self.settingsAction  = QAction(QIcon("icons/settings.png"), "Settings", self)
+        self.settingsAction = QAction(QIcon("icons/settings.png"), "Settings", self)
         self.settingsAction.setStatusTip("Settings")
         self.settingsAction.setShortcut("Application Settings")
         self.settingsAction.triggered.connect(self.applicationSettings)
@@ -336,15 +357,19 @@ class MainWindow(QMainWindow):
         self.deleteAction.setShortcut("Ctrl+D")
         self.deleteAction.triggered.connect(self.removeText)
 
-        self.findAction = QAction(QIcon("icons/find.png"),"Find and Replaced", self)
+        self.refreshAction = QAction('Refresh', self)
+        self.refreshAction.setStatusTip('Refresh the server directory')
+        self.refreshAction.triggered.connect(self.refresh)
+
+        self.findAction = QAction(QIcon("icons/find.png"), "Find and Replaced", self)
         self.findAction.setStatusTip("Find and Replace")
         self.findAction.setShortcut("Ctrl+F")
         self.findAction.triggered.connect(find.Find(self).show)
 
-        imageAction = QAction(QIcon("icons/image.png"), "Insert image", self)
-        imageAction.setStatusTip("Insert and image")
-        imageAction.setShortcut("Ctrl+Shift+I")
-        imageAction.triggered.connect(self.insertImage)
+        self.imageAction = QAction(QIcon("icons/image.png"), "Insert image", self)
+        self.imageAction.setStatusTip("Insert and image")
+        self.imageAction.setShortcut("Ctrl+Shift+I")
+        self.imageAction.triggered.connect(self.insertImage)
 
         wordCountAction = QAction(QIcon("icons/count.png"), "Words/Characters count", self)
         wordCountAction.setStatusTip("Word/Characteer count")
@@ -356,41 +381,38 @@ class MainWindow(QMainWindow):
         tableAction.setShortcut("Ctrl+I")
         tableAction.triggered.connect(table.Table(self).show)
 
-        listAction = QAction("Insert List",self)
+        listAction = QAction("Insert List", self)
         listAction.setStatusTip("Insert a horse list")
         listAction.setShortcut("Ctrl + L")
         listAction.triggered.connect(self.insertList)
 
-        dateTimeAction = QAction(QIcon("icons/calender.png"),"Date and Time", self)
+        dateTimeAction = QAction(QIcon("icons/calender.png"), "Date and Time", self)
         dateTimeAction.setStatusTip("Insert Date and Time")
         dateTimeAction.setShortcut("Ctrl+D")
         dateTimeAction.triggered.connect(pushdate.DateTime(self).show)
 
-        self.toolBar.addAction(self.newAction)
-        self.toolBar.addAction(self.openAction)
-        self.toolBar.addAction(self.saveAction)
-        self.toolBar.addSeparator()
-        self.toolBar.addAction(self.printAction)
-        self.toolBar.addAction(self.previewAction)
-        self.toolBar.addSeparator()
-        self.toolBar.addAction(self.undoAction)
-        self.toolBar.addAction(self.redoAction)
-        self.toolBar.addSeparator()
-        self.toolBar.addAction(self.pasteAction)
-        self.toolBar.addAction(self.cutAction)
-        self.toolBar.addAction(self.copyAction)
-        self.toolBar.addAction(self.deleteAction)
-        self.toolBar.addAction(self.bulletAction)
-        self.toolBar.addAction(self.numberedAction)
-        self.toolBar.addSeparator()
-        self.toolBar.addAction(self.findAction)
-        self.toolBar.addAction(self.settingsAction)
-        self.toolBar.addAction(imageAction)
-        self.toolBar.addAction(wordCountAction)
-        self.toolBar.addAction(tableAction)
-        self.toolBar.addAction(listAction)
-        self.toolBar.addAction(dateTimeAction)
-        self.addToolBarBreak()
+        self.documentBar = self.addToolBar('Documents')
+        self.documentBar.setObjectName("Documents")
+        self.documentBar.setVisible(True)
+        self.documentBar.addAction(self.printAction)
+        self.documentBar.addAction(self.previewAction)
+        self.documentBar.addSeparator()
+        self.documentBar.addAction(self.undoAction)
+        self.documentBar.addAction(self.redoAction)
+        self.documentBar.addSeparator()
+        self.documentBar.addAction(self.pasteAction)
+        self.documentBar.addAction(self.cutAction)
+        self.documentBar.addAction(self.copyAction)
+        self.documentBar.addAction(self.deleteAction)
+        self.documentBar.addAction(self.bulletAction)
+        self.documentBar.addAction(self.numberedAction)
+        self.documentBar.addSeparator()
+        self.documentBar.addAction(self.findAction)
+        self.documentBar.addAction(self.settingsAction)
+        self.documentBar.addAction(self.imageAction)
+        self.documentBar.addAction(wordCountAction)
+        self.documentBar.addAction(tableAction)
+        self.documentBar.addAction(dateTimeAction)
 
 
     def initFormatBar(self):
@@ -455,6 +477,7 @@ class MainWindow(QMainWindow):
 
         self.formatBar = self.addToolBar("Format")
         self.formatBar.setObjectName("Format")
+        self.formatBar.setVisible(True)
 
         self.formatBar.addWidget(fontBox)
         self.formatBar.addWidget(fontSize)
@@ -489,30 +512,61 @@ class MainWindow(QMainWindow):
     def initAccountBar(self):
         self.accountBar = self.addToolBar('Account')
         self.accountBar.setObjectName("Account")
+        self.accountBar.hide()
 
         self.invoiceAction = QAction(QIcon(":/Icons8/Accounts/invoice.png"), "Invoice", self)
         self.invoiceAction.setStatusTip("Receive Invoice")
         self.invoiceAction.triggered.connect(self.invoice)
+        self.invoiceAction.setEnabled(False)
 
         self.paymentAction = QAction(QIcon(":/Icons8/Accounts/cash.png"), 'Payment', self)
         self.paymentAction.setStatusTip("Receive Payment")
         self.paymentAction.triggered.connect(self.payment)
+        self.paymentAction.setEnabled(False)
 
         self.accountAction = QAction(QIcon(":/Icons8/Accounts/ledger.png"),'Account', self)
         self.accountAction.setStatusTip("Show Agreement Account")
         self.accountAction.triggered.connect(self.account)
+        self.accountAction.setEnabled(False)
+
+        self.addTransferAction = QAction("Add Transfers", self)
+        self.addTransferAction.setStatusTip("Horse  Transfer among locations")
+        self.addTransferAction.setObjectName("AddTransfer")
+        self.addTransferAction.triggered.connect(self.transferHorse)
+
+        self.editTransferAction = QAction("Edit Transfers", self)
+        self.editTransferAction.setStatusTip("Edit Horse  Transfer")
+        self.editTransferAction.setObjectName("EditTransfer")
+        self.editTransferAction.triggered.connect(self.transferHorse)
+
+        self.addInvoiceAction = QAction("Add Invoice", self)
+        self.addInvoiceAction.setStatusTip("Ads a new Invoice")
+        self.addInvoiceAction.triggered.connect(lambda: self.invoice(APM.OPEN_NEW))
+
+        self.editInvoiceAction = QAction("Edit Invoices", self)
+        self.editInvoiceAction.setStatusTip("Edit/deletes Invoices")
+        self.editInvoiceAction.triggered.connect(lambda: self.invoice(APM.OPEN_EDIT))
+
+        self.addPaymentAction = QAction("Add Payment", self)
+        self.addPaymentAction.setStatusTip("Adds a new payment")
+        self.addPaymentAction.triggered.connect(lambda: self.payment(APM.OPEN_NEW))
+
+        self.editPaymentAction = QAction("Edit Payment", self)
+        self.editPaymentAction.setStatusTip("Edits/deletes a payment")
+        self.editPaymentAction.triggered.connect(lambda: self.payment)
+
+
 
         self.accountBar.addAction(self.invoiceAction)
         self.accountBar.addAction(self.paymentAction)
         self.accountBar.addAction(self.accountAction)
+        self.accountBar.addSeparator()
+        self.accountBar.addAction(self.addTransferAction)
 
     def initHorseBar(self):
         self.horseBar = self.addToolBar('Horse Management')
         self.horseBar.setObjectName("Management")
-
-        self.startAction = QAction(QIcon(":Icons8/transport.png"), "Movements Horse", self)
-        self.startAction.setStatusTip("Horse Starting Date")
-        self.startAction.triggered.connect(self.startHorse)
+        self.horseBar.setVisible(False)
 
         self.saleAction = QAction(QIcon(":/Icons8/Sales/sales.png"), "Horse Sale", self)
         self.saleAction.setStatusTip("Agreement Horse Sale")
@@ -530,16 +584,11 @@ class MainWindow(QMainWindow):
         self.breakingAction.setStatusTip("Receive Broke Horse")
         self.breakingAction.triggered.connect(self.receiveBrokeHorse)
 
-        self.addHorseAction = QAction(QIcon(":/Icons8/Horses/newhorse.png"), "Increase Horse Inventory", self)
-        self.addHorseAction.setStatusTip("Update available Inventory")
-        self.addHorseAction.triggered.connect(lambda: self.updateHorseInventory(APM.OPEN_NEW))
-
         self.brokeHorseReceivingAction = QAction(QIcon(":/Icons8/Horses/BrokeHorse.png"),
                                                   "Broke Horse Receiving", self)
         self.brokeHorseReceivingAction.setStatusTip("Receive broken horses")
         self.brokeHorseReceivingAction.triggered.connect(self.brokenHorseReceiving)
 
-        self.horseBar.addAction(self.startAction)
         self.horseBar.addAction(self.saleAction)
         self.horseBar.addAction(self.addHorseAction)
         self.horseBar.addAction(self.breakingAction)
@@ -548,23 +597,37 @@ class MainWindow(QMainWindow):
         self.horseBar.addAction(self.deathAction)
 
     def initPeopleBar(self):
-        self.newContactAction = QAction(QIcon(":/Icons8/People/addcontact.png"),"New Contact",self)
+        self.newContactAction = QAction(QIcon(":/Icons8/People/addcontact.png"), "New Contact", self)
         self.newContactAction.triggered.connect(lambda: self.contact(APM.OPEN_NEW))
 
-        self.editContactAction = QAction(QIcon(":/Icons8/People/editcontact.png"),"Edit Contact", self)
+        self.editContactAction = QAction(QIcon(":/Icons8/People/editcontact.png"), "Edit Contact", self)
         self.editContactAction.triggered.connect(lambda: self.contact(APM.OPEN_EDIT))
 
-        self.managerAction = QAction(QIcon(":/Icons8/People/manager.png"),"List of Managers", self)
+        self.managerAction = QAction(QIcon(":/Icons8/People/manager.png"), "List of Managers", self)
         self.managerAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_RESPONSIBLE))
 
-        self.playerAction = QAction(QIcon(":/Icons8/People/PlayerSeller.png"),"Polo Players", self)
+        self.playerAction = QAction(QIcon(":/Icons8/People/PlayerSeller.png"), "Play And Sale", self)
         self.playerAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_PLAYER))
 
-        self.breakerAction = QAction(QIcon(":/Icons8/People/HorseBreaker.png"), "Horse Breakers", self)
+        self.breakerAction = QAction(QIcon(":/Icons8/Suppliers/coach.png"), "Horse Breaking", self)
         self.breakerAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_BREAKER))
 
-        #self.sellerAction = QAction(QIcon(":/Icons8/People/Seller.png"), "Horse Sellers", self)
-        #self.sellerAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_SELLER))
+        self.showPoloPlayerAction = QAction(QIcon(":/Icons8/Suppliers/polo.png"), "Polo Players", self)
+        self.showPoloPlayerAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_POLO_PLAYER))
+
+        self.addPoloPlayerAction = QAction(QIcon(":Icons8/Suppliers/polo.png"), "Add Polo Player", self)
+        self.addPoloPlayerAction.triggered.connect(lambda: self.supplierData(APM.CONTACT_POLO_PLAYER))
+        self.addPoloPlayerAction.setEnabled(False)
+
+        self.showBusterAction = QAction(QIcon(":Icons8/People/HorseBreaker.png"), "Horse Busters", self)
+        self.showBusterAction.triggered.connect(lambda: self.showContacts(type=APM.CONTACT_BUSTER))
+
+        self.addBusterAction = QAction(QIcon(":Icons8/People/HorseBreaker.png"), "Add Horse Buster", self)
+        self.addBusterAction.triggered.connect(lambda: self.supplierData(APM.CONTACT_BUSTER))
+        self.addBusterAction.setEnabled(False)
+
+        # self.sellerAction = QAction(QIcon(":/Icons8/People/Seller.png"), "Horse Sellers", self)
+        # self.sellerAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_SELLER))
 
         self.dealerAction = QAction(QIcon(":/Icons8/People/Dealer.png"), "Horse Dealers", self)
         self.dealerAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_DEALER))
@@ -572,6 +635,18 @@ class MainWindow(QMainWindow):
         self.buyerAction = QAction(QIcon(":/Icons8/People/farmer.png"), "Horse Buyers", self)
         self.buyerAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_BUYER))
 
+        self.vetAction = QAction(QIcon(":/Icons8/Suppliers/veterinarian.png"), 'Horse Vets', self)
+        self.vetAction.triggered.connect(lambda: self.showContacts(APM.CONTACT_VETERINARY))
+
+        self.addLocationAction = QAction("Add Location", self)
+        self.addLocationAction.triggered.connect(lambda : self.handleLocations(APM.OPEN_NEW))
+
+        self.editLocationAction = QAction("Edit Locations", self)
+        self.editLocationAction.triggered.connect(lambda: self.handleLocations(APM.OPEN_EDIT) )
+
+        self.supplierDataAction = QAction("Supplier Data", self)
+        self.supplierDataAction.setEnabled(False)
+        self.supplierDataAction.triggered.connect(self.supplierData)
 
         self.peopleToolBar = self.addToolBar("Contacts")
         self.peopleToolBar.setObjectName("contacts")
@@ -582,8 +657,9 @@ class MainWindow(QMainWindow):
         self.peopleToolBar.addAction(self.managerAction)
         self.peopleToolBar.addAction(self.buyerAction)
         self.peopleToolBar.addAction(self.dealerAction)
-
-
+        self.peopleToolBar.addAction(self.showBusterAction)
+        self.peopleToolBar.addAction(self.showPoloPlayerAction)
+        self.addToolBarBreak()
 
     def initMenuBar(self):
         menuBar = self.menuBar()
@@ -693,17 +769,17 @@ class MainWindow(QMainWindow):
          self.paymentDockAction]))
 
 
-        editHorseAction = QAction('Edit Horse', self)
-        editHorseAction.triggered.connect(lambda: self.updateHorseInventory(APM.OPEN_EDIT))
-        importHorseAction = QAction('Import Horse', self)
+        self.editHorseAction = QAction('Edit Horse', self)
+        self.editHorseAction.triggered.connect(lambda: self.updateHorseInventory(APM.OPEN_EDIT))
+
+        self.importHorseAction = QAction('Import Horse', self)
+
         allAvailableHorsesAction = QAction("Available Horses", self)
         allAvailableHorsesAction.triggered.connect(self.allAvailableHorsesInventory)
         allPlayingHorsesAction = QAction("Schooling Horses",self)
         allPlayingHorsesAction.triggered.connect(lambda: self.allOnAgreementHorses(APM.REPORT_TYPE_ALL_PLAYING_HORSES))
         allBreakingHorsesAction = QAction("Breaking Horses", self)
         allBreakingHorsesAction.triggered.connect(lambda: self.allOnAgreementHorses(APM.REPORT_TYPE_ALL_BREAKING_HORSES))
-
-
 
         file = menuBar.addMenu("File")
         file.addAction(self.newAction)
@@ -712,6 +788,7 @@ class MainWindow(QMainWindow):
         file.addAction(self.saveAsAction)
         file.addAction(self.closeAction)
         file.addAction(self.deleteAction)
+        file.addAction(self.refreshAction)
         file.addSeparator()
         file.addAction(self.settingsAction)
         file.addAction(self.quitAction)
@@ -756,8 +833,7 @@ class MainWindow(QMainWindow):
 
         horses = menuBar.addMenu("Horses")
         horses.addAction(self.addHorseAction)
-        horses.addAction(editHorseAction)
-        horses.addAction(self.startAction)
+        horses.addAction(self.editHorseAction)
         horses.addAction(self.brokeHorseReceivingAction)
         horses.addAction(self.saleAction)
         horses.addAction(self.rejectAction)
@@ -767,13 +843,52 @@ class MainWindow(QMainWindow):
         contacts.addAction(self.newContactAction)
         contacts.addAction(self.editContactAction)
         contacts.addSeparator()
-        contacts.addAction(self.playerAction)
-        contacts.addAction(self.breakerAction)
         contacts.addAction(self.managerAction)
         contacts.addSeparator()
         contacts.addAction(self.buyerAction)
         #contacts.addAction(self.sellerAction)
         contacts.addAction(self.dealerAction)
+        contacts.addSeparator()
+        contacts.addAction(self.playerAction)
+        contacts.addAction(self.breakerAction)
+        contacts.addAction(self.showPoloPlayerAction)
+        contacts.addAction(self.showBusterAction)
+        contacts.addAction(self.vetAction)
+
+        accounts = menuBar.addMenu("Accounts")
+        suppliers = accounts.addMenu(QIcon(":/Icons8/Suppliers/supplier.png"), "Suppliers")
+
+        suppliers.addAction(self.openSupplierAction)
+        suppliers.addAction(self.supplierDataAction)
+        suppliers.addSeparator()
+        self.locations = accounts.addMenu(QIcon(":/Icons8/Stable.png"),"Locations")
+        self.locations.addAction(self.addLocationAction)
+        self.locations.addAction(self.editLocationAction)
+        self.locations.setEnabled(False)
+        #suppliers.addAction(self.locationAction)
+        self.transfers = accounts.addMenu(QIcon(":/Icons8/transport.png"), "Horse Transfers")
+        self.transfers.addAction(self.addTransferAction)
+        self.transfers.addAction(self.editTransferAction)
+        self.transfers.setEnabled(False)
+        #suppliers.addAction(self.transferAction)
+        suppliers.addSeparator()
+        suppliers.addAction(self.addPoloPlayerAction)
+        suppliers.addAction(self.addBusterAction)
+        accounts.addSeparator()
+        self.payments = accounts.addMenu(QIcon(":Icons8/Accounts/dollar.png"),"Payments")
+        self.payments.addAction(self.addPaymentAction)
+        self.payments.addAction(self.editPaymentAction)
+        self.payments.setEnabled(False)
+        #accounts.addAction(self.paymentAction)
+        self.invoices = accounts.addMenu(QIcon(":Icons8/Accounts/bill.png"),"Invoices")
+        self.invoices.addAction(self.addInvoiceAction)
+        self.invoices.addAction(self.editInvoiceAction)
+        self.invoices.setEnabled(False)
+        accounts.addAction(self.accountAction)
+
+        #accounts.addAction(self.invoiceAction)
+        accounts.addSeparator()
+
 
         help = menuBar.addMenu("Help")
 
@@ -800,9 +915,11 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def brokenHorseReceiving(self):
         try:
-            h = ReceiveBroken(self.qdb, self.con_string,self.agreementId)
+            h = ReceiveBroken(self.qdb, self.con_string,self.agreementId, self)
             h.show()
-            h.exec()
+            #h.exec()
+        except DataError as err:
+            self.messageBox(self, "Data", err.source + ' ' + err.message)
         except Exception as err:
             print(type(err).__name__, err.args)
 
@@ -862,7 +979,7 @@ class MainWindow(QMainWindow):
             if res != QMessageBox.Yes:
                 return
         try:
-            horseid = record.value(0)
+            horseid = record.value(16)
             detail = Horses(self.qdb, APM.OPEN_EDIT_ONE,record, horseid,self)
             detail.show()
         except DataError as err:
@@ -1183,7 +1300,7 @@ class MainWindow(QMainWindow):
             res = settWindow.exec_()
 
         except Exception as err:
-            print(err        )
+            print(err)
         return res
 
     @pyqtSlot()
@@ -1229,7 +1346,7 @@ class MainWindow(QMainWindow):
         necessary and produce: filename and new agreement file; """
 
         try:
-            new = newAgreement.Agreement(self.qdb, self.address, parent=None)
+            new = newAgreement.Agreement(self.qdb, self.address, parent=self)
             new.show()
             result = new.exec_()
             if result:
@@ -1321,7 +1438,7 @@ class MainWindow(QMainWindow):
             self.changesSaved = True
             self.setDockWindows()
         except Exception as err:
-            print('open_file', type(err).__name__)
+            print('open_file', type(err).__name__, err.args)
 
     @pyqtSlot()
     def open(self):
@@ -1384,7 +1501,8 @@ class MainWindow(QMainWindow):
             h.horseBaseId as AccessID,
             ah.breakerid,
             ah.playerid,
-            ah.active as Active
+            ah.active as Active,
+            h.id
             FROM agreementhorses as ah
             INNER JOIN horses as h ON ah.horseid = h.id
             INNER JOIN coats as c ON h.coatid = c.id
@@ -1393,6 +1511,8 @@ class MainWindow(QMainWindow):
             WHERE ah.agreementid = ?""")
             qry.addBindValue(QVariant(self.agreementId))
             qry.exec_()
+            if qry.lastError().type() != 0:
+                raise APM.DataError('queryAgreementHorses', qry.lastError().text())
         return qry
 
     def queryAccounts(self):
@@ -1560,7 +1680,6 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(QPoint)
     def openPopDir(self, pos):
-
         try:
             openFileAction = QAction("Open file")
             openFileAction.triggered.connect(lambda : self.getTreeData(APM.OPEN_FILE))
@@ -1592,7 +1711,11 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def refreshDirectory(self):
-        self.treeViewAgr.model().setRootPath(QDir.path(QDir(self.agreementsPath)))
+        treeModel = self.file_model()
+        path = treeModel.rootPath()
+        self.treeViewAgr.setModel(treeModel)
+        self.treeViewAgr.setRootIndex(treeModel.index(path))
+
 
     def delete_file(self, filename):
         pass
@@ -1621,7 +1744,7 @@ class MainWindow(QMainWindow):
             removeColAction = QAction("Remove Column", self)
             removeColAction.triggered.connect(self.removeCol)
 
-            insertRowAction = QAction("Inser Row", self)
+            insertRowAction = QAction("Insert Row", self)
             insertRowAction.triggered.connect(self.insertRow)
 
             insertColAction = QAction("Insert Column", self)
@@ -1727,6 +1850,10 @@ class MainWindow(QMainWindow):
         pass
 
     @pyqtSlot()
+    def refresh(self):
+        self.refreshDirectory()
+
+    @pyqtSlot()
     def renameFile(self):
         pass
 
@@ -1798,7 +1925,8 @@ class MainWindow(QMainWindow):
                        12: ("AccessID", True, False, False,0),
                        13: ("BreakerID", True, False, False, 0),
                        14: ("PlayerID", True, False, False, 0),
-                       15: ("Active", True, False, False, 0),}
+                       15: ("Active", True, False, False, 0),
+                       16: ("horseid", True, False, False, 0)}
 
             colorDict = colorDict = {'column':(3),
                         u'\u2640':(QColor('pink'), QColor('black')),
@@ -1973,6 +2101,7 @@ class MainWindow(QMainWindow):
             15: ("AHD", True, True, False, None)}
         table = TableViewAndModel(colDict, colorDict, (300, 300), qry)
         table.doubleClicked.connect(lambda: self.getRejectedData(table))
+
         return table
 
     def getRejectedData(self, table):
@@ -1984,7 +2113,7 @@ class MainWindow(QMainWindow):
             model.query().isActive()
             model.query().seek(row)
             record = model.query().record()
-            res = self.messageBoxYesNo("Would check {}'s rejection record?".format(record.value(1)),
+            res = self.messageBoxYesNo("Would you check {}'s rejection record?".format(record.value(1)),
                                        'Check the data and/or enter/edit as necessary')
             if res != QMessageBox.Yes:
                 return
@@ -2001,6 +2130,80 @@ class MainWindow(QMainWindow):
     def insertList(self):
         pass
 
+    @pyqtSlot()
+    def handleLocations(self, mode):
+        res = Location(self.qdb, self.supplierId, mode=mode)
+        res.show()
+        res.exec()
+
+    @pyqtSlot()
+    def chooseSupplier(self):
+        try:
+            res = ChooseActiveSupplier(self.qdb, self)
+            res.show()
+            res.exec()
+        except DataError as err:
+            print(err.source, err.args)
+        finally:
+            if self.qdb.isOpen:
+                self.qdb.close()
+        enabled = False if self.supplierId is None else True
+        self.payments.setEnabled(enabled)
+        self.accountAction.setEnabled(enabled)
+        self.invoices.setEnabled(enabled)
+        self.invoiceAction.setEnabled(enabled)
+        self.locations.setEnabled(enabled)
+        self.transfers.setEnabled(enabled)
+        self.supplierDataAction.setEnabled(enabled)
+        self.addBusterAction.setEnabled(enabled) if self.buster else self.addBusterAction.setEnabled(False)
+        self.addPoloPlayerAction.setEnabled(enabled) if self.player else self.addPoloPlayerAction.setEnabled(False)
+        self.accountBar.setVisible(enabled)
+        self.supplierData()
+
+    @pyqtSlot()
+    def supplierData(self,type=None):
+        try:
+            res = Supplier(self.qdb, self.supplierId, type,parent=self)
+            res.show()
+            #res.exec()
+        except DataError as err:
+            print(err.source, err.message)
+        finally:
+            if self.qdb.isOpen():
+                self.qdb.close()
+
+    @pyqtSlot()
+    def transferHorse(self):
+        try:
+            if self.sender().objectName() == "AddTransfer":
+                res = Transfer(self.qdb, self.supplierId,con_string=self.con_string, parent=self)
+            else:
+                res = EditTransfer(self.qdb,self.supplierId, self)
+            res.show()
+            res.exec()
+        except DataError as err:
+            return
+        finally:
+            if self.qdb.isOpen():
+                self.qdb.close()
+
+    @property
+    def supplier(self):
+        return self._supplier
+
+    @supplier.setter
+    def supplier(self, data):
+        self._supplier = data
+
+    @pyqtSlot()
+    def invoice(self, mode):
+        #place the add/edit module connection
+        pass
+
+    @pyqtSlot()
+    def payment(self, mode):
+        #Implement connection with payments
+        pass
 
 def main():
     app = QApplication(sys.argv)
