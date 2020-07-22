@@ -4,27 +4,36 @@ import os
 from PyQt5.QtWidgets import (QGroupBox, QDialog, QHBoxLayout, QVBoxLayout,QFormLayout, QLabel, QLineEdit, QComboBox,
                              QPushButton, QApplication, QFileDialog, QMessageBox, QFrame, QPlainTextEdit)
 from PyQt5.QtCore import Qt, QSettings, QCoreApplication, pyqtSlot, QVariant
-from PyQt5.QtSql import QSqlDatabase, QSqlQuery
+from PyQt5.QtSql import QSqlDatabase, QSqlQuery, QSqlQueryModel
 from configparser import ConfigParser
 from ext.socketclient import RequestHandler
-from ext.APM import DataError, Cdatabase, FocusPlainTextEdit, CreateDatabase
+from ext.Contacts import Location
+from ext.APM import DataError, Cdatabase, FocusPlainTextEdit, CreateDatabase, FocusCombo
 import resources
 
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, db=None, parent=None):
         super().__init__()
         self.parent = parent
+        self.contactId = None
+        self.locationId = None
         self.setUI()
         self.state = False
         self.con_string = {}
+        self.access_con_string = None
         self.address = self.serverAddress
         self.serverOk = False
         self.databaseOk = False
-        self.okToSave = [self.serverOk, self.databaseOk]
+        self.accessOk = False
+        self.okToSave = [self.serverOk, self.databaseOk,self.accessOk]
         self.farmDirty = False
         self.ownerDirty = False
+        self.db = db
+        self.loadData()
+        self.showComboLocation()
+        self.isNameEditable = False
         self.setModal(True)
 
 
@@ -42,24 +51,77 @@ class SettingsDialog(QDialog):
         lblTCP = QLabel("TCP Server")
         lblTCP.setAlignment(Qt.AlignHCenter)
 
-        lblOwnerTitle = QLabel("Horse Owner")
+        lblAccess = QLabel("MS Access Database Connection")
+        lblAccess.setAlignment(Qt.AlignCenter)
+        lblDriver = QLabel("Driver")
+        self.comboDriver = FocusCombo(self,["Microsoft Access Driver (*.mdb, *.accdb)",
+                                       "Microsof Access Driver (*.mdb)"])
+        self.comboDriver.setCurrentIndex(0)
+        self.comboDriver.setModelColumn(1)
+        lblAccessPath = QLabel("Access DB Path")
+        self.linePath = QLineEdit()
+
+        lblAccessName = QLabel("Database Name")
+        self.lineAccessName = QLineEdit()
+
+        btnAccessDir = QPushButton("...")
+        btnAccessDir.setMaximumWidth(30)
+        btnAccessDir.setMaximumHeight(28)
+        btnAccessDir.setObjectName("AccessPath")
+        btnAccessDir.clicked.connect(self.lookForPath)
+
+        btnAccessFile = QPushButton("...")
+        btnAccessFile.setMaximumWidth(30)
+        btnAccessFile.setMaximumHeight(28)
+        btnAccessFile.setObjectName("AccessFile")
+        btnAccessFile.clicked.connect(self.lookForFile)
+
+        btnIconsFile = QPushButton("...")
+        btnIconsFile.setMaximumWidth(30)
+        btnIconsFile.setMaximumHeight(28)
+        btnIconsFile.setObjectName("IconsFile")
+        btnIconsFile.clicked.connect(self.lookForFile)
+
+        btnAccess = QPushButton("Test")
+        btnAccess.setMaximumWidth(50)
+        btnAccess.clicked.connect(self.accessTest)
+
+        lblAccessConnect = QLabel("Connection Test")
+        self.lblAccessTestResult = QLabel("Untested")
+        self.lblAccessTestResult.setStyleSheet("QLabel {background-color: black; color: white}")
+        self.lblAccessTestResult.setMaximumWidth(150)
+
+        lblOwnerTitle = QLabel("Operation Owner")
         lblOwnerTitle.setAlignment(Qt.AlignHCenter)
 
         lblOwner = QLabel("Owner")
         self.lineOwner = QLineEdit()
         self.lineOwner.editingFinished.connect(self.dirtyOwner)
+        self.lineOwner.editingFinished.connect(self.isEditable)
 
         lblAddress = QLabel("Address")
         self.textAddress = QPlainTextEdit()
+        self.textAddress.document().modificationChanged.connect(self.dirtyOwner)
 
-        lblFarm = QLabel("Farm")
+        self.lblFarm = QLabel("Main Location")
         self.lineFarm = QLineEdit()
         self.lineFarm.editingFinished.connect(self.dirtyFarm)
 
-        lblFarmAddress = QLabel("Farm Address")
+        self.lblNewLocation = QLabel("New Main Location")
+        self.lblNewLocation.setVisible(False)
+        self.comboLocation = FocusCombo()
+        modelLocation = QSqlQueryModel()
+        self.comboLocation.setEditable(True)
+        self.comboLocation.setModel(modelLocation)
+        self.comboLocation.activated.connect(self.dirtyFarm)
+        self.comboLocation.currentIndexChanged.connect(self.upgradeLocationAddress)
+        self.comboLocation.focusLost.connect(self.locationFocusLost)
+        self.comboLocation.setVisible(False)
+
+
+        lblFarmAddress = QLabel("Address")
         self.textFarmAddress = FocusPlainTextEdit()
         self.textFarmAddress.focusOut.connect(self.dirtyFarm)
-
 
         self.lblServerTestResult = QLabel('Untested')
         self.lblServerTestResult.setStyleSheet("QLabel {background-color: black; color:white}")
@@ -112,8 +174,14 @@ class SettingsDialog(QDialog):
         self.btnContinue.setEnabled(False)
         self.btnContinue.clicked.connect(self.accept)
 
+        btnTestAll = QPushButton("Test All Servers")
+        btnTestAll.clicked.connect(self.testAllServers)
+
         btnCancel = QPushButton("Cancel")
-        btnCancel.clicked.connect(self.close)
+        btnCancel.clicked.connect(self.widgetClose)
+
+        btnReset = QPushButton("Reset")
+        btnReset.clicked.connect(self.resetData)
 
         btnTest = QPushButton("Test")
         btnTest.setMaximumWidth(50)
@@ -126,21 +194,37 @@ class SettingsDialog(QDialog):
         btnDir = QPushButton("...")
         btnDir.setMaximumWidth(30)
         btnDir.setMaximumHeight(28)
-        btnDir.clicked.connect(self.lookForFile)
+        btnDir.setObjectName("AgreementPath")
+        btnDir.clicked.connect(self.lookForPath)
 
         lfrmLayout = QFormLayout()
         rfrmLayout = QFormLayout()
         testHLayout = QHBoxLayout()
         dirHLayout = QHBoxLayout()
+        accessHLayout = QHBoxLayout()
 
         btnHLayout = QHBoxLayout()
         btnHLayout.addWidget(self.btnContinue)
+        btnHLayout.addWidget(btnTestAll)
         btnHLayout.addStretch(10)
+        btnHLayout.addWidget(btnReset)
         btnHLayout.addWidget(btnCancel)
         btnHLayout.addWidget(self.btnOk)
 
         testHLayout.addWidget(btnTest)
         testHLayout.addWidget(self.lblTestResult)
+
+        accessTestLayout = QHBoxLayout()
+        accessTestLayout.addWidget(btnAccess)
+        accessTestLayout.addWidget(self.lblAccessTestResult)
+
+        accessNameLayout = QHBoxLayout()
+        accessNameLayout.addWidget(self.lineAccessName)
+        accessNameLayout.addWidget(btnAccessFile)
+
+        iconsFileLayout = QHBoxLayout()
+        iconsFileLayout.addWidget(self.lineIconsDir)
+        iconsFileLayout.addWidget(btnIconsFile)
 
         serverHLayout = QHBoxLayout()
         serverHLayout.addWidget(btnServer)
@@ -149,33 +233,44 @@ class SettingsDialog(QDialog):
         dirHLayout.addWidget(self.lineAgreementDir)
         dirHLayout.addWidget(btnDir)
 
+        accessHLayout.addWidget(self.linePath)
+        accessHLayout.addWidget(btnAccessDir)
+
         lfrmLayout.addRow(lblDatabaseTitle)
         lfrmLayout.addRow(lblDatabaseHost, self.lineDatabaseHost)
         lfrmLayout.addRow(lblDatabaseName, self.lineDatabaseName)
         lfrmLayout.addRow(lblDatabaseUser, self.lineDatabaseUser)
         lfrmLayout.addRow(lblDatabasePwd, self.lineDatabasePwd)
         lfrmLayout.addRow(lblTest, testHLayout)
+
         lfrmLayout.addRow(lblTCP)
         lfrmLayout.addRow(lblServerName, self.lineServerName)
         lfrmLayout.addRow(lblServerPort, self.lineServerPort)
         lfrmLayout.addRow(lblServerTest, serverHLayout)
-        lfrmLayout.addRow(lblOrganization)
-        lfrmLayout.addRow(lblOrganizationName, self.lineOrganizationName)
-        lfrmLayout.addRow(lblSoftwareName, self.lineSoftwareName)
-        lfrmLayout.addRow(lblPath)
-        lfrmLayout.addRow(lblAgreementDir, dirHLayout)
-        lfrmLayout.addRow(lblIconsDir, self.lineIconsDir)
 
+        lfrmLayout.addRow(lblAccess)
+        lfrmLayout.addRow(lblDriver, self.comboDriver)
+        lfrmLayout.addRow(lblAccessPath,accessHLayout)
+        lfrmLayout.addRow(lblAccessName, accessNameLayout)
+        lfrmLayout.addRow(lblAccessConnect, accessTestLayout)
 
         rfrmLayout.addRow(lblOwnerTitle)
         rfrmLayout.addRow(lblOwner, self.lineOwner)
         rfrmLayout.addRow(lblAddress, self.textAddress)
-        rfrmLayout.addRow(lblFarm, self.lineFarm)
+        rfrmLayout.addRow(self.lblFarm, self.lineFarm)
+        rfrmLayout.addRow(self.lblNewLocation, self.comboLocation)
         rfrmLayout.addRow(lblFarmAddress, self.textFarmAddress)
+        rfrmLayout.addRow(lblPath)
+        rfrmLayout.addRow(lblAgreementDir, dirHLayout)
+        rfrmLayout.addRow(lblIconsDir, iconsFileLayout)
+        rfrmLayout.addRow(lblOrganization)
+        rfrmLayout.addRow(lblOrganizationName, self.lineOrganizationName)
+        rfrmLayout.addRow(lblSoftwareName, self.lineSoftwareName)
 
 
         frameLeft = QGroupBox("Servers")
         frameLeft.setLayout(lfrmLayout)
+
         frameRight = QGroupBox("Data and Directories")
         frameRight.setLayout(rfrmLayout)
 
@@ -187,26 +282,163 @@ class SettingsDialog(QDialog):
         layout.addLayout(btnHLayout)
         self.setLayout(layout)
 
-        settings = QSettings("ext/config.ini", QSettings.IniFormat)
-        self.lineDatabaseHost.setText(settings.value("mysql/host"))
-        self.lineDatabaseName.setText(settings.value("mysql/Database"))
-        self.lineDatabaseUser.setText(settings.value("mysql/user"))
-        self.lineDatabasePwd.setText(settings.value("mysql/password"))
+    @pyqtSlot()
+    def testAllServers(self):
+        try:
+            self.connectionTest()
+            self.serverTest()
+            self.accessTest()
+        except Exception as err:
+            print("testAllServers", type(err), err.args)
 
-        self.lineOrganizationName.setText(settings.value("organization/companyName"))
-        self.lineSoftwareName.setText(settings.value("organization/softwareTitle"))
+    @pyqtSlot()
+    def isEditable(self):
+        try:
+            msgBox = QMessageBox(self)
+            msgBox.setText("Would you edit the owner's name or add a new one?")
+            addButton = msgBox.addButton("Add", QMessageBox.ActionRole)
+            editButton = msgBox.addButton('Edit',QMessageBox.ActionRole)
+            cancelButton = msgBox.addButton(QMessageBox.Abort)
+            ans = msgBox.exec()
+            if msgBox.clickedButton() == editButton:
+                self.isNameEditable = True
+            elif msgBox.clickedButton() == addButton:
+                self.isNameEditable = False
+                self.textFarmAddress.clear()
+                self.textAddress.clear()
+                self.lineFarm.clear()
+                self.locationId = None
+                self.contactId, address = self.ownerLook()
+                self.textAddress.setPlainText(address)
+                self.showComboLocation()
+        except Exception as err:
+            print("isEditable", type(err), err.args)
 
-        self.lineAgreementDir.setText(settings.value("path/Agreements"))
-        self.lineIconsDir.setText(settings.value("path/icons"))
+    @pyqtSlot()
+    def resetData(self):
+        self.loadData()
+        self.showComboLocation()
 
-        self.lineServerName.setText(settings.value("Server/serverName"))
-        self.lineServerPort.setText(settings.value("Server/serverPort"))
-        self.address = self.serverAddress
+    @pyqtSlot()
+    def upgradeLocationAddress(self):
+        try:
+            #self.textFarmAddress.setPlainText(self.comboLocation.getHiddenData(2))
+            self.textFarmAddress.setPlainText(self.comboLocation.model().query().value(2))
 
-        self.lineOwner.setText(settings.value("owner/ownerName"))
-        self.textAddress.setPlainText(settings.value("owner/Address"))
-        self.lineFarm.setText(settings.value("owner/FarmName"))
-        self.textFarmAddress.setPlainText(settings.value("owner/FarmAddress"))
+        except Exception as err:
+            print("upgradeLocationAdress", err.args)
+
+    def showComboLocation(self):
+        try:
+            if not self.db.isOpen():
+                self.db.open()
+            self.loadLocationCombo()
+            if self.comboLocation.model().query().size() < 1:
+                return
+            if self.locationId:
+                row = self.comboLocation.seekData(self.locationId)
+            else:
+                row = self.comboLocation.seekData(1, 3)
+            self.comboLocation.setCurrentIndex(row)
+            self.lblNewLocation.setVisible(True)
+            self.comboLocation.setVisible(True)
+            self.comboLocation.setModelColumn(1)
+        except AttributeError: pass
+        except Exception as err:
+            print("showComboLocation", err.args)
+
+    @pyqtSlot()
+    def loadLocationCombo(self):
+        try:
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL system_loadLocations({})".format(
+                self.contactId if self.contactId is not None else 'NULL'))
+            if qry.lastError().type() != 0:
+                raise DataError('loadCLocationCombo', qry.lastError().text())
+            self.comboLocation.model().setQuery(qry)
+        except DataError as err:
+            print(err.source, err.message)
+
+    @pyqtSlot(FocusCombo)
+    def locationFocusLost(self, combo):
+        try:
+            self.setFocusPolicy(Qt.NoFocus)
+            name = combo.currentText()
+            if combo.findText(name) > -1:
+                return
+            else:
+                msgBox = QMessageBox(self)
+                msgBox.setText("Include:'{}' as a new Location or edit the '{}'".format(
+                                               self.comboLocation.currentText(), self.lineFarm.text()))
+                insertButton = msgBox.addButton("Insert",QMessageBox.ActionRole)
+                editButton = msgBox.addButton("Edit",QMessageBox.ActionRole)
+                cancelButton = msgBox.addButton(QMessageBox.Abort)
+                ans = msgBox.exec()
+                if  msgBox.clickedButton() == insertButton:
+                    self.loadNewLocation(name)
+                    return
+                elif msgBox.clickedButton() == editButton:
+                    return
+                combo.setFocus()
+                combo.setFocusPolicy(Qt.NoFocus)
+                combo.setCurrentIndex(0)
+        except Exception as err:
+            print(err)
+        finally:
+            self.setFocusPolicy(Qt.StrongFocus)
+
+    def loadNewLocation(self, name):
+        try:
+            loc = Location(self.db,self.contactId, name=name)
+            loc.show()
+            self.showComboLocation()
+        except DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print("loadNewLocation", err.args)
+
+    def loadData(self):
+        try:
+            settings = QSettings("ext/config.ini", QSettings.IniFormat)
+            self.lineDatabaseHost.setText(settings.value("mysql/host"))
+            self.lineDatabaseName.setText(settings.value("mysql/Database"))
+            self.lineDatabaseUser.setText(settings.value("mysql/user"))
+            self.lineDatabasePwd.setText(settings.value("mysql/password"))
+        except TypeError:
+            pass
+        try:
+            self.lineOrganizationName.setText(settings.value("organization/companyName"))
+            self.lineSoftwareName.setText(settings.value("organization/softwareTitle"))
+        except TypeError:
+            pass
+        try:
+            self.lineAgreementDir.setText(settings.value("path/Agreements"))
+            self.lineIconsDir.setText(settings.value("path/icons"))
+        except TypeError:
+            pass
+        try:
+            self.lineServerName.setText(settings.value("Server/serverName"))
+            self.lineServerPort.setText(settings.value("Server/serverPort"))
+            self.address = self.serverAddress
+        except TypeError:
+            pass
+        try:
+            self.lineOwner.setText(settings.value("owner/ownerName"))
+            self.textAddress.setPlainText(settings.value("owner/Address"))
+            self.lineFarm.setText(settings.value("owner/FarmName"))
+            self.textFarmAddress.setPlainText(settings.value("owner/FarmAddress"))
+            if settings.value("owner/locationId"):
+                self.locationId = int(settings.value("owner/locationId"))
+            if not settings.value("owner/contactId") == 'None':
+                self.contactId = int(settings.value("owner/contactId"))
+        except TypeError:
+            pass
+        try:
+            self.comboDriver.setCurrentIndex(int(settings.value("access/driver")))
+            self.linePath.setText(settings.value("access/path"))
+            self.lineAccessName.setText(settings.value("access/fullpath"))
+        except TypeError as err:
+            print(type(err), err.args)
 
     @property
     def serverAddress(self):
@@ -226,6 +458,21 @@ class SettingsDialog(QDialog):
         if self.state:
             return self.lineAgreementDir.text()
 
+    @property
+    def accessConnectionString(self):
+        try:
+            if self.access_con_string:
+                return self.access_con_string
+        except Exception as err:
+            print("accessConnectionString", err.args)
+
+    @property
+    def accessDatabaseName(self):
+        try:
+            name = os.path.basename(self.lineAccessName.text())
+            return name
+        except Exception as err:
+            print("accessDatabase", type(err), err.args)
 
     @property
     def connectionString(self):
@@ -277,16 +524,45 @@ class SettingsDialog(QDialog):
             popup.show()
 
     @pyqtSlot()
+    def lookForPath(self):
+        try:
+            obj = self.sender()
+            if obj.objectName() == "AgreementPath":
+                capt= "Agreements Directory"
+                baseDir = self.lineAgreementDir.text()
+            elif obj.objectName() == "AccessPath":
+                capt = "Access Database Directory"
+                baseDir = os.getcwd()
+            rootDir = QFileDialog.getExistingDirectory(caption=capt,
+                                                       directory=baseDir)
+            if obj.objectName() == "AgreementsDir":
+                self.lineAgreementDir.setText(rootDir)
+            else:
+                self.linePath.setText(rootDir)
+        except Exception as err:
+            print("lookForFile", err.args)
+
+    @pyqtSlot()
     def lookForFile(self):
         try:
-            if not os.path.exists(os.path.join(os.getcwd(), 'Agreements/')):
-                os.makedirs(os.path.join(os.getcwd(),"Agreements/Breaking/"))
-                os.makedirs(os.path.join(os.getcwd(), "Agreements/Play&Sale/"))
-            rootDir = QFileDialog.getExistingDirectory(caption="Agreements Directory",
-                                                       directory=os.getcwd())
-            self.lineAgreementDir.setText(rootDir)
+            obj = self.sender()
+            if obj.objectName() == "AccessFile":
+                capt = "Access Database"
+                baseDir = self.linePath.text()
+                fileType = "Access Database (*.accdb *.mdb)"
+            elif obj.objectName() == "IconsFile":
+                capt = "Icons Resource File"
+                fileType = "Icons Files (*.qrc, *.png)"
+                baseDir = os.getcwd()
+            res = QFileDialog.getOpenFileName(self, caption=capt,directory=baseDir, filter=fileType)
+            #fileName = os.path.basename(res[0])
+            fileName = res[0]
+            if obj.objectName() == "AccessFile":
+                self.lineAccessName.setText(fileName)
+            else:
+                self.lineIconsDir.setText(os.path.dirname(fileName))
         except Exception as err:
-            print(err)
+            print("lookForFile", err.args)
 
     @pyqtSlot()
     def saveAndClose(self, state=False):
@@ -313,24 +589,32 @@ class SettingsDialog(QDialog):
 
                 sett.setValue("owner/ownerName", self.lineOwner.text())
                 sett.setValue("owner/Address", self.textAddress.toPlainText())
-                sett.setValue("owner/FarmName", self.lineFarm.text())
+                sett.setValue("owner/FarmName", self.comboLocation.currentText())
                 sett.setValue("owner/FarmAddress", self.textFarmAddress.toPlainText())
 
                 if self.farmDirty:
                     self.farmChanged()
+                sett.setValue("owner/locationId", self.comboLocation.getHiddenData(0))
+
+                sett.setValue("access/driver", self.comboDriver.getHiddenData(0))
+                sett.setValue("access/path", self.linePath.text())
+                sett.setValue("access/fullpath",self.lineAccessName.text())
 
                 if self.ownerDirty:
-                    self.ownerChanged()
+                    contactId = self.ownerChanged()
+                    sett.setValue("owner/contactid", str(contactId) )
 
             except Exception as err:
                 print('saveAndClose',type(err).__name__, err.args)
             self.accept()
 
-    def close(self):
+    def widgetClose(self):
         try:
-            self.reject()
-        except Exception as err:
-            print(type(err).__name__, err.args)
+            self.db.close()
+        except AttributeError:
+            pass
+        finally:
+            self.done(QDialog.Rejected)
 
     def read_db_config(self,section='mysql', configfile = 'config.ini'):
         """ Read database configuration file and return a dictionary object
@@ -403,6 +687,8 @@ class SettingsDialog(QDialog):
                 self.lblTestResult.setStyleSheet("QLabel{background-color: red; color: white}")
                 raise TypeError("MySql is closed")
             self.lblTestResult.setText(testMessage)
+            self.db = db
+            return True, db
         except DataError as err:
             self.lblTestResult.setStyleSheet("QLabel{background-color: red; color: white}")
             self.lblTestResult.setText('Could not create')
@@ -422,7 +708,34 @@ class SettingsDialog(QDialog):
             pop.show()
             pop.exec_()
             return False, None
-        return True, db
+
+    @pyqtSlot()
+    def accessTest(self):
+        try:
+            if not self.lineAccessName.text():
+                self.loadData()
+            hdb = QSqlDatabase("QODBC")
+            con_string ="DRIVER={}; DBQ={};".format("{" + self.comboDriver.currentText() + "}",
+                                                      self.lineAccessName.text())
+            self.lblAccessTestResult.setStyleSheet("QLabel{background-color: yellow; color: black}")
+            self.repaint()
+            testMessage = "Failed"
+            hdb.setDatabaseName(con_string)
+            if hdb.open():
+                textMessage = "Succeeded"
+                self.state = True
+                self.lblAccessTestResult.setStyleSheet("QLabel{background-color: green; color: white}")
+                self.accessOk = True
+                self.okToSave[2] = self.accessOk
+                self.checkBtnEnabled()
+                self.access_con_string = con_string
+                hdb.close()
+            else:
+                self.lblAccessTestResult.setStyleSheet("QLabel{background-color: red; color: white}")
+                self.lblAccessTestResult.setText(testMessage)
+                raise DataError("Cannot open Database {}".format(self.lineDatabaseName),  hdb.lastError().text())
+        except DataError as err:
+            QMessageBox.critical(self, "Connection Error", "{}; {}".format(err.source, err.message),QMessageBox.Ok)
 
     @property
     def owner(self):
@@ -441,9 +754,10 @@ class SettingsDialog(QDialog):
         return self.textFarmAddress.toPlainText()
 
     def checkBtnEnabled(self):
-        if self.okToSave.count(True) == 2:
-            self.btnOk.setEnabled(True)
-            self.btnContinue.setEnabled(True)
+        if False in self.okToSave:
+            return
+        self.btnOk.setEnabled(True)
+        self.btnContinue.setEnabled(True)
 
     @pyqtSlot()
     def dirtyFarm(self):
@@ -453,93 +767,45 @@ class SettingsDialog(QDialog):
     def dirtyOwner(self):
         self.ownerDirty = True
 
-    def ownerChanged(self):
-        if self.connectionTest()[0]:
-            setDb = self.connectionTest()[1]
+    @pyqtSlot()
+    def ownerLook(self):
         try:
-            with Cdatabase(setDb, 'ownerChanged') as db:
-                qry = QSqlQuery(db)
-                #Checks if the owner already exits in contacts database as representative
-                qry.prepare("""SELECT id, fullname, responsible, active 
-                FROM contacts  
-                WHERE fullname = ? """)
-                qry.addBindValue(QVariant(self.lineOwner.text()))
-                qry.exec()
-                if qry.lastError().type() != 0:
-                    raise DataError('ownerChanged', qry.lastError().text())
-                if qry.size() > 0:
-                    qry.first()
-                    if not qry.value(2) or not qry.value(3):
-                        qryUpdate = QSqlQuery(db)
-                        qryUpdate.prepare("""UPDATE contacts 
-                        SET responsible = True, active = True 
-                        WHERE id = ? """)
-                        qryUpdate.addBindValue(QVariant(qry.value(0)))
-                        if qryUpdate.lastError().type() != 0:
-                            raise DataError('ownerChanged-qryUpdate', qryUpdate.lastError().text())
-                else:
-                    qryInsert = QSqlQuery(db)
-                    qryInsert.prepare("""INSERT INTO contacts 
-                    (fullname, responsible, active) 
-                    VALUES(?, ?, ?)""")
-                    qryInsert.addBindValue(QVariant(self.lineOwner.text()))
-                    qryInsert.addBindValue(QVariant(True))
-                    qryInsert.addBindValue(QVariant(True))
-                    qryInsert.exec()
-                    if qryInsert.lastError().type() != 0:
-                        raise DataError('ownerChanged-qryInsert', qryInsert.lastError().text())
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL settings_lookforowner('{}')".format(self.lineOwner.text()))
+            if qry.lastError().type() != 0:
+                raise DataError("ownerLook", qry.lastError().text())
+            if qry.first():
+                return qry.value(0), qry.value(1)
         except DataError as err:
             print(err.source, err.message)
 
-    def farmChanged(self):
-        if self.connectionTest()[0]:
-            setDb = self.connectionTest()[1]
+    @pyqtSlot()
+    def ownerChanged(self):
         try:
-            with Cdatabase(setDb, 'farmChanged') as db:
-                qry = QSqlQuery(db)
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL settings_setowner( {}, '{}', '{}')".format(
+                'NULL' if self.contactId is None or not self.isNameEditable else self.contactId,
+                self.lineOwner.text(),
+                self.textAddress.toPlainText()))
+            if qry.lastError().type() != 0:
+                raise DataError("ownerChanged", qry.lastError().text())
+            if qry.first():
+                return qry.value(0)
+        except DataError as err:
+            print(err.source, err.message)
 
-                qry.prepare("""SELECT id, name , address 
-                FROM locations 
-                WHERE active 
-                AND name = ? """)
-                qry.addBindValue(QVariant(self.lineFarm.text()))
-                qry.exec()
-                if qry.lastError().type() != 0:
-                    raise DataError("farmChanged", qry.lastError().text())
-                if qry.size()>0:
-                    #This Farm already exists
-                    qry.first()
-                    if qry.value(2) != self.textFarmAddress.toPlainText():
-                        qryUpdate = QSqlQuery(db)
-                        qryUpdate.prepare("""UPDATE locations 
-                        SET address = ? 
-                        WHERE id = ?""")
-                        qryUpdate.addBindValue(QVariant(self.textFarmAddress.toPlainText()))
-                        qryUpdate.addBindValue(QVariant(qry.value(0)))
-                        qryUpdate.exec()
-                        if qry.lastError().type() != 0:
-                            raise DataError("farmChanged-Update", qry.lastError().text())
-                else:
-                    # Set inactive all farm addresses that may previously exists.
-                    qryInactive = QSqlQuery(db)
-                    qry.exec("""UPDATE locations 
-                    SET active = False 
-                    WHERE contactid = 0""")
-                    if qry.lastError().type() != 0:
-                        raise DataError("farmChanged-Insert", qry.lastError().text())
-                    #Insert the new farm name and address
-                    qryInsert = QSqlQuery(db)
-                    qryInsert.prepare(""" INSERT INTO locations 
-                    (name, contactid, address, main, active) 
-                    VALUES (?, ?, ?, ?, ?""")
-                    qryInsert.addBindValue(QVariant(self.lineFarm.text()))
-                    qryInsert.addBindValue(QVariant(0))
-                    qryInsert.addBindValue(QVariant(self.textFarmAddress.toPlainText()))
-                    qryInsert.addBindValue(QVariant(True))
-                    qryInsert.addBindValue(QVariant(True))
-                    qryInsert.exec()
-                    if qry.lastError().type() != 0:
-                        raise DataError("farmChanged-Insert", qry.lastError().text())
+    @pyqtSlot()
+    def farmChanged(self):
+        try:
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL settings_setlocation('{}',  '{}', {})".format(
+                self.textFarmAddress.toPlainText(),
+                self.lineFarm.text(),
+                self.comboLocation.getHiddenData(0)))
+            if qry.lastError().type() != 0:
+                raise DataError("farmChanged", qry.lastError().text())
+            if qry.first():
+                return qry.value(0)
         except DataError as err:
             print(err.source, err.message)
 

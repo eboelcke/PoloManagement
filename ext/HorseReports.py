@@ -6,11 +6,9 @@ from PyQt5.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt5.QtCore import Qt, QVariant
 from PyQt5.QtGui import QColor, QTextLength
 from PyQt5.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
-#from ext.CQSqlDatabase import Cdatabase
-from ext.APM import DataError, ReportPrint, QSqlAlignColorQueryModel
-from ext.Horses import QSqlAlignQueryModel
+from ext.APM import DataError, QSqlAlignColorQueryModel
 from ext import APM
-from ext.APM import Cdatabase
+from ext.Printing import ReportPrint
 
 
 
@@ -33,14 +31,13 @@ class AvailableHorses(QDialog):
         elif self.reportType == APM.REPORT_TYPE_ALL_PLAYING_HORSES:
             self.setAllBreakingHorsesTable(APM.REPORT_TYPE_ALL_PLAYING_HORSES)
 
-
     def setUI(self):
         self.setWindowTitle("Unassigned Horses")
         self.horseTable = QTableView()
         self.horseTable.verticalHeader().setVisible(False)
 
         oKButton = QPushButton("OK")
-        oKButton.clicked.connect(self.close)
+        oKButton.clicked.connect(self.widgetClose)
         oKButton.setMaximumSize(50, 30)
 
         printButton = QPushButton('Print')
@@ -55,7 +52,6 @@ class AvailableHorses(QDialog):
         buttonsLayout.addWidget(printButton)
         buttonsLayout.addWidget(previewButton)
         buttonsLayout.addWidget(oKButton)
-
 
         layout = QVBoxLayout()
         layout.addWidget(self.horseTable)
@@ -89,10 +85,10 @@ class AvailableHorses(QDialog):
         INNER JOIN contacts as ct
         ON a.supplierid = ct.id 
         WHERE ah.active 
-            AND a.breaking = ?
-        ORDER BY a.breaking, a.id;""")
-        qry.addBindValue(QVariant(True))if self.reportType == APM.REPORT_TYPE_ALL_BREAKING_HORSES \
-            else qry.addBindValue(QVariant(False))
+            AND a.agreementtype in (SELECT ?)
+        ORDER BY a.agreementtype, a.id;""")
+        qry.addBindValue(QVariant(0))if self.reportType == APM.REPORT_TYPE_ALL_BREAKING_HORSES \
+            else qry.addBindValue(QVariant(1).value())
         qry.exec_()
         try:
             if qry.size() < 0:
@@ -104,7 +100,7 @@ class AvailableHorses(QDialog):
                          u'\u2640': (QColor('pink'), QColor('black')),
                          u'\u2642': (QColor('lightskyblue'), QColor('black')),
                          u'\u265E': (QColor('lightgrey'), QColor('black'))}
-            allHorsesModel = QSqlAlignColorQueryModel(self.centerColumns,colorDict)
+            allHorsesModel = QSqlAlignColorQueryModel(self.centerColumns,[], colorDict)
             allHorsesModel.setQuery(qry)
             allHorsesModel.setHeaderData(0, Qt.Horizontal, "ID")
             allHorsesModel.setHeaderData(1, Qt.Horizontal, "RP")
@@ -151,6 +147,8 @@ class AvailableHorses(QDialog):
 
         except DataError as err:
             QMessageBox.warning(self, "DataError", err.message)
+            raise DataError(err.source, err.message)
+            #self.widgetClose()
 
 
     def setAllPlayingHorsesTable(self):
@@ -170,16 +168,15 @@ class AvailableHorses(QDialog):
         where:
             column is the query field number,
             key is the comparison value to check agaisnt the query(column).value()
-            and (QTextColor, QBackGroundColor) is a tuple with two QColor values, the first for
+            and (QTextColor, QBackGroundColor) is a tuple wit099999999999999999999999999999o9h two QColor values, the first for
             QTextColorRole, and the second for QbackgroundColorrole"""
         colorDict = {'column':(5),
                         u'\u2640':(QColor('pink'), QColor('black')),
                         u'\u2642':(QColor('lightskyblue'), QColor('black')),
                         u'\u265E': (QColor('lightgrey'), QColor('black'))}
         try:
-            with Cdatabase(self.cdb, 'reportAll') as db:
-                qry = QSqlQuery(db)
-                qry.exec_("""SELECT h.id,
+            qry = QSqlQuery(self.cdb)
+            qry.exec_("""SELECT h.id,
                  h.rp,
                  h.name,
                  h.dob,
@@ -259,8 +256,8 @@ class AvailableHorses(QDialog):
                           self.printColumnWidths)
         rep.handlePreview()
 
-
-
+    def widgetClose(self):
+        self.done(QDialog.Rejected)
 
 
 

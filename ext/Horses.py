@@ -4,11 +4,12 @@ from PyQt5.QtWidgets import ( QDialog, QHBoxLayout, QVBoxLayout, QGridLayout, QL
                              QPushButton, QTableView, QMessageBox, QCheckBox, QComboBox,
                               QHeaderView, QAbstractItemView, QDateEdit, QTextEdit)
 from PyQt5.QtCore import Qt, QSettings, pyqtSlot, QVariant, QDate
-from PyQt5.QtGui import QStandardItemModel, QColor, QFont, QDoubleValidator
-from PyQt5.QtSql import QSqlQuery, QSqlQueryModel, QSqlDriver
+from PyQt5.QtGui import QStandardItemModel, QColor, QFont, QDoubleValidator, QIcon
+from PyQt5.QtSql import QSqlQuery, QSqlQueryModel,QSqlDatabase
 from ext.Settings import SettingsDialog
-from ext import APM
-from ext.APM import FocusCombo, QSqlAlignColorQueryModel, PercentOrAmountLineEdit, Cdatabase
+from ext import APM, Settings
+from ext.APM import (FocusCombo, QSqlAlignColorQueryModel, PercentOrAmountLineEdit, Cdatabase,
+REJECTION_TYPE_FINAL, REJECTION_TYPE_VETERINARY, REJECTION_TYPE_TRANSITORY, CLEARENCE_REASON_REJECT)
 #from ext.CQSqlDatabase import Cdatabase
 import pymysql
 from configparser import ConfigParser
@@ -269,7 +270,7 @@ class Horses(QDialog):
                 colorDict = {}
                 self.tableHorses = QTableView()
                 self.tableHorses.verticalHeader().setVisible(False)
-                self.modelHorses = APM.QSqlAlignColorQueryModel(centerColumns, colorDict)
+                self.modelHorses = APM.QSqlAlignColorQueryModel(centerColumns, [], colorDict)
                 qry = self.getHorsesQuery()
                 self.modelHorses.setQuery(qry)
                 self.modelHorses.setHeaderData(0,Qt.Horizontal,"ID")
@@ -938,22 +939,21 @@ class StartHorse(QDialog):
 
     def loadCombos(self):
         try:
-            with Cdatabase(self.db, 'Combos') as ccdb:
-                qryBreakers = QSqlQuery(self.db)
-                qryBreakers.exec("SELECT id, fullname FROM contacts WHERE breaker = True")
-                modelBreaker = QSqlQueryModel()
-                modelBreaker.setQuery(qryBreakers)
-                self.comboBreaker.setModel(modelBreaker)
-                self.comboBreaker.setModelColumn(1)
-                self.comboBreaker.setCurrentIndex(-1)
+            qryBreakers = QSqlQuery(self.db)
+            qryBreakers.exec("SELECT id, fullname FROM contacts WHERE breaker = True")
+            modelBreaker = QSqlQueryModel()
+            modelBreaker.setQuery(qryBreakers)
+            self.comboBreaker.setModel(modelBreaker)
+            self.comboBreaker.setModelColumn(1)
+            self.comboBreaker.setCurrentIndex(-1)
 
-                qryPlayers = QSqlQuery(self.db)
-                qryPlayers.exec("SELECT id, fullname FROM contacts WHERE player = True")
-                modelPlayer = QSqlQueryModel()
-                modelPlayer.setQuery(qryPlayers)
-                self.comboPlayer.setModel(modelPlayer)
-                self.comboPlayer.setModelColumn(1)
-                self.comboPlayer.setCurrentIndex(-1)
+            qryPlayers = QSqlQuery(self.db)
+            qryPlayers.exec("SELECT id, fullname FROM contacts WHERE player = True")
+            modelPlayer = QSqlQueryModel()
+            modelPlayer.setQuery(qryPlayers)
+            self.comboPlayer.setModel(modelPlayer)
+            self.comboPlayer.setModelColumn(1)
+            self.comboPlayer.setCurrentIndex(-1)
         except Exception as err:
             raise APM.DataError("loadCombos", err.args)
 
@@ -1041,9 +1041,8 @@ class StartHorse(QDialog):
 
     def getHorsesQuery(self):
         try:
-            with Cdatabase(self.db, "UnSartedHorses") as cdb:
-                qry = QSqlQuery(cdb)
-                qry.exec(""" SELECT
+            qry = QSqlQuery(self.db)
+            qry.exec(""" SELECT
                 a.id No,
                 c.fullname Provider,
                 h.name Horse,
@@ -1068,40 +1067,40 @@ class StartHorse(QDialog):
                 WHERE ah.active AND IsNull(ah.dos)
                 ORDER BY a.breaking, c.fullname
                 """)
-                if qry.lastError().type() != 0:
-                    raise APM.DataError("getHorseQuery", qry.lastError().text())
-                if qry.size() == 0 :
-                    raise APM.DataError("getHorseQuery()","There are no horses to start")
-                return qry
+            if qry.lastError().type() != 0:
+                raise APM.DataError("getHorseQuery", qry.lastError().text())
+            if qry.size() == 0 :
+                raise APM.DataError("getHorseQuery()","There are no horses to start")
+            return qry
         except APM.DataError as err:
             QMessageBox.warning(self, err.source, err.message)
+            raise APM.DataError(err.source, err,message)
 
     @pyqtSlot()
     def saveAndClose(self):
         try:
-            with Cdatabase(self.db, "Save") as cdb:
-                qry = QSqlQuery(cdb)
-                strSql = """UPDATE agreementhorses
+            qry = QSqlQuery(self.db)
+            strSql = """UPDATE agreementhorses
                     SET dos = ?, 
                     breakerid = ?, 
                     playerid = ?
                     """
-                if self.record.value(7) == 0:
-                    strSql +=", billable = True "
-                whereSql = "WHERE id = ? "
-                strSql += whereSql
-                qry.prepare(strSql)
-                qry.addBindValue(QVariant(self.dateDos.date.toString("yyyy-MM-dd")))
-                row = self.comboBreaker.currentIndex()
-                idx = self.comboBreaker.model().index(row, 0)
-                qry.addBindValue(QVariant(self.comboBreaker.model().data(idx)))
-                row = self.comboPlayer.currentIndex()
-                idx = self.comboPlayer.model().index(row, 0)
-                qry.addBindValue(QVariant(self.comboPlayer.model().data(idx)))
-                qry.addBindValue(QVariant(self.record.value(8)))
-                qry.exec()
-                if qry.lastError().ErrorType() > 0:
-                    raise APM.DataError('SaveAndClose', qry.lastError().text())
+            if self.record.value(7) == 0:
+                strSql +=", billable = True "
+            whereSql = "WHERE id = ? "
+            strSql += whereSql
+            qry.prepare(strSql)
+            qry.addBindValue(QVariant(self.dateDos.date.toString("yyyy-MM-dd")))
+            row = self.comboBreaker.currentIndex()
+            idx = self.comboBreaker.model().index(row, 0)
+            qry.addBindValue(QVariant(self.comboBreaker.model().data(idx)))
+            row = self.comboPlayer.currentIndex()
+            idx = self.comboPlayer.model().index(row, 0)
+            qry.addBindValue(QVariant(self.comboPlayer.model().data(idx)))
+            qry.addBindValue(QVariant(self.record.value(8)))
+            qry.exec()
+            if qry.lastError().ErrorType() > 0:
+                raise APM.DataError('SaveAndClose', qry.lastError().text())
             qry = self.tableHorses.model().setQuery(self.getHorsesQuery())
         except APM.DataError as err:
             print(err.source, err.message)
@@ -1336,7 +1335,7 @@ class Mortality(QDialog):
             self.pushEdit.setEnabled(True)
             self.pushEdit.clicked.connect(self.enableEdit)
 
-        lblStock = QLabel("Horses Inventory")
+        self.lblStock = QLabel("Horses Inventory")
 
 
         pushCancel = QPushButton("Cancel")
@@ -1700,8 +1699,8 @@ class Sales(QDialog):
               parent : calling widget
               record :Sales record from dockSales"""
 
-    def __init__(self, db, agreementid, mode = None,
-                 record = None, con_string = None ,parent = None):
+    def __init__(self, db, agreementid, mode=None,
+                 record=None, con_string=None, qryLoad=None, parent=None):
         super().__init__()
         self.db = db
         self.parent = parent
@@ -1709,12 +1708,11 @@ class Sales(QDialog):
         self.record = record
         self.con_string = con_string
         self.mode = mode
+        self.qryLoad = qryLoad
         self.setUI()
         self.sharePercent = 0.00
         self.saleExpenses = 0.00
         self.saleDict = {}
-        if self.mode is not None:
-            self.getHorseData()
 
     def setUI(self):
         self.setModal(True)
@@ -1768,7 +1766,7 @@ class Sales(QDialog):
 
         salePurposes = ['Polo Export', 'Polo Local', 'Breeding', 'Ridding', 'Rejection', 'Unknown']
 
-        lblPurpose = QLabel("Purpose")
+        lblPurpose = QLabel("Destination")
         self.comboPurpose = FocusCombo(self, salePurposes)
         self.comboPurpose.setToolTip("Buyer´s purpose")
         self.comboPurpose.setCurrentIndex(-1)
@@ -1777,7 +1775,7 @@ class Sales(QDialog):
 
         saleTypes = ['Auction', 'Dealer', 'Direct','Unknown']
 
-        lblType = QLabel("type")
+        lblType = QLabel("Sale Type")
         self.comboType = FocusCombo(self, saleTypes)
         self.comboType.setToolTip("Transaction's Type")
         self.comboType.setCurrentIndex(-1)
@@ -1789,8 +1787,9 @@ class Sales(QDialog):
         lblDocument = QLabel("Document")
         self.comboDocument = FocusCombo(self, saleDocuments)
         self.comboDocument.setToolTip("Transaction´s Document")
-        self.comboDocument.setCurrentIndex(-1)
+        self.comboDocument.setCurrentIndex(0)
         self.comboDocument.setModelColumn(1)
+        self.comboDocument.activated.connect(lambda: self.setNumber(self.comboDocument.getHiddenData(0)))
         self.comboDocument.activated.connect(self.enableSave)
 
         priceValidator = QDoubleValidator(0.00, 100000.00, 2)
@@ -1812,10 +1811,8 @@ class Sales(QDialog):
         self.lineNumber = QLineEdit()
         self.lineNumber.setToolTip("Sale Document Number")
         self.lineNumber.editingFinished.connect(self.enableSave)
-
-        if self.mode is None :
-            self.tableHorses = self.setTableViewAndModel()
-            self.tableHorses.doubleClicked.connect(self.getHorseData)
+        self.tableHorses = self.setTableViewAndModel()
+        self.tableHorses.doubleClicked.connect(self.getHorseData)
 
         self.pushSave = QPushButton("Save")
         self.pushSave.setMaximumWidth(60)
@@ -1827,34 +1824,36 @@ class Sales(QDialog):
         self.textNotes.setMaximumHeight(50)
         self.textNotes.textChanged.connect(self.enableSave)
 
-        if self.mode is not None:
 
-            self.comboBuyer.setEnabled(False)
-            self.comboDealer.setEnabled(False)
-            self.comboRepresentative.setEnabled(False)
-            self.comboPurpose.setEnabled(False)
-            self.comboType.setEnabled(False)
-            self.comboDocument.setEnabled(False)
 
-            self.linePrice.setEnabled(False)
-            self.lineComission.setEnabled(False)
-            self.lineNumber.setEnabled(False)
-            self.dateOfSale.setEnabled(False)
-            self.textNotes.setEnabled(False)
+        self.comboBuyer.setEnabled(False)
+        self.comboDealer.setEnabled(False)
+        self.comboRepresentative.setEnabled(False)
+        self.comboPurpose.setEnabled(False)
+        self.comboType.setEnabled(False)
+        self.comboDocument.setEnabled(False)
+
+        self.linePrice.setEnabled(False)
+        self.lineComission.setEnabled(False)
+        self.lineNumber.setEnabled(False)
+        self.dateOfSale.setEnabled(False)
+        self.textNotes.setEnabled(False)
+        if self.mode == APM.OPEN_EDIT:
+
+            self.pushReset = QPushButton()
+            self.pushReset.setIcon(QIcon(":Icons8/Edit/reset.png"))
+            self.pushReset.setMaximumWidth(50)
+            self.pushReset.setEnabled(False)
+            self.pushReset.clicked.connect(self.clearData)
 
             self.pushDelete = QPushButton("Delete")
-            self.pushDelete.setMaximumWidth(60)
-            self.pushDelete.setEnabled(True)
+            self.pushDelete.setMaximumWidth(70)
+            self.pushDelete.setEnabled(False)
             self.pushDelete.clicked.connect(self.deleteRecord)
-
-            self.pushEdit = QPushButton("Edit")
-            self.pushEdit.setMaximumWidth(60)
-            self.pushEdit.setEnabled(True)
-            self.pushEdit.clicked.connect(self.enableEdit)
 
         self.lblStock = QLabel("Horses Inventory")
 
-        pushCancel = QPushButton("Cancel")
+        pushCancel = QPushButton("Exit")
         pushCancel.setMaximumWidth(60)
         pushCancel.clicked.connect(self.close)
         pushCancel.setFocus()
@@ -1868,36 +1867,41 @@ class Sales(QDialog):
         gLayout.addWidget(self.lblAge,0,3)
         gLayout.addWidget(self.lblSex, 1, 0)
         gLayout.addWidget(self.lblCoat, 1, 2)
-        gLayout.addWidget(lblBuyer,2,0)
-        gLayout.addWidget(self.comboBuyer,2,1)
-        gLayout.addWidget(lblDealer,2,2)
-        gLayout.addWidget(self.comboDealer,2,3)
-        gLayout.addWidget(lblRepresentative,3,0)
-        gLayout.addWidget(self.comboRepresentative,3,1)
-        gLayout.addWidget(lblDateOfSale,3,2)
-        gLayout.addWidget(self.dateOfSale,3,3 )
-        gLayout.addWidget(lblType,4,0)
-        gLayout.addWidget(self.comboType,4,1)
-        gLayout.addWidget(lblPurpose,4,2)
-        gLayout.addWidget(self.comboPurpose,4,3)
-        gLayout.addWidget(self.lineComission, 5, 0, 1, 2)
-        gLayout.addWidget(lblPrice,5,2)
-        gLayout.addWidget(self.linePrice,5,3)
-        gLayout.addWidget(lblSharePrice, 6, 0)
-        gLayout.addWidget(self.lineSharePrice,6,1)
-        gLayout.addWidget(lblNetPrice, 6, 2)
-        gLayout.addWidget(self.lineNetPrice, 6, 3)
-        gLayout.addWidget(lblDocument,7,0)
-        gLayout.addWidget(self.comboDocument,7,1)
-        gLayout.addWidget(lblNumber,7,2)
-        gLayout.addWidget(self.lineNumber,7,3)
+        gLayout.addWidget(lblDateOfSale, 2, 0)
+        gLayout.addWidget(self.dateOfSale, 2, 1)
+        gLayout.addWidget(lblRepresentative, 2, 2)
+        gLayout.addWidget(self.comboRepresentative, 2, 3)
+        gLayout.addWidget(lblDocument, 3, 0)
+        gLayout.addWidget(self.comboDocument, 3, 1)
+        gLayout.addWidget(lblNumber, 3, 2)
+        gLayout.addWidget(self.lineNumber, 3, 3)
+
+        gLayout.addWidget(lblBuyer, 4, 0)
+        gLayout.addWidget(self.comboBuyer,4,1)
+        gLayout.addWidget(lblDealer,4,2)
+        gLayout.addWidget(self.comboDealer,4,3)
+        gLayout.addWidget(lblType,5,0)
+        gLayout.addWidget(self.comboType,5,1)
+        gLayout.addWidget(lblPurpose,5,2)
+        gLayout.addWidget(self.comboPurpose,5,3)
+
+        gLayout.addWidget(self.lineComission, 6, 0, 1, 2)
+        gLayout.addWidget(lblPrice,6,2)
+        gLayout.addWidget(self.linePrice,6,3)
+        gLayout.addWidget(lblSharePrice, 7, 0)
+        gLayout.addWidget(self.lineSharePrice,7,1)
+        gLayout.addWidget(lblNetPrice, 7, 2)
+        gLayout.addWidget(self.lineNetPrice, 7, 3)
         gLayout.addWidget(lblNotes,8,0)
         gLayout.addWidget(self.textNotes,8,1,1,3)
         #gLayout.addWidget(self.lblStock,9,0)
 
-        if self.mode is not None:
-            pushLayout.addWidget(self.pushEdit)
+        if self.mode == APM.OPEN_EDIT:
+            pushLayout.addWidget(self.pushReset)
             pushLayout.addWidget(self.pushDelete)
+            self.setWindowTitle("Edit Sale Record")
+        else:
+            self.setWindowTitle("Sales")
 
         pushLayout.addSpacing(400)
         pushLayout.addWidget(pushCancel)
@@ -1905,37 +1909,62 @@ class Sales(QDialog):
 
         layout.addLayout(gLayout)
         layout.addWidget(self.lblStock)
-        if self.mode is None:
-            layout.addWidget(self.tableHorses)
+        layout.addWidget(self.tableHorses)
         layout.addLayout(pushLayout)
 
         self.setLayout(layout)
-        self.setWindowTitle("Sales")
 
+    @pyqtSlot(int)
+    def setNumber(self, type):
+        if type == 0:
+            self.lineNumber.setText("I-")
+        elif type == 1:
+            self.lineNumber.setText("R-")
+        else:
+            self.lineNumber.setText("--")
 
     def clearData(self):
-        self.dateOfSale.setDate(QDate.currentDate())
-        self.lblHorse.setText("Horse: ")
-        self.lblRp.setText("RP: ")
-        self.lblCoat.setText("Coat: ")
-        self.lblSex.setText("Sex: ")
-        self.lblAge.setText('Age: ')
-        self.lblStock.clear()
-        self.linePrice.setText('0.00')
-        self.lineComission.lineValue.setText('0.00')
-        self.lineSharePrice.setText('0.00')
-        self.lineNetPrice.setText('0.00')
-        self.lineSharePrice.setText('0.00')
-        self.lineNumber.clear()
-        self.comboRepresentative.setCurrentIndex(-1)
-        self.comboDealer.setCurrentIndex(-1)
-        self.comboBuyer.setCurrentIndex(-1)
-        self.comboDocument.setCurrentIndex(-1)
-        self.comboType.setCurrentIndex(-1)
-        self.comboPurpose.setCurrentIndex(-1)
-        self.textNotes.clear()
-        self.pushSave.setEnabled(False)
-        self.setWindowTitle("Sales")
+        try:
+            self.dateOfSale.setDate(QDate.currentDate())
+            self.dateOfSale.setEnabled(True)
+            self.lblHorse.setText("Horse: ")
+            self.lblRp.setText("RP: ")
+            self.lblCoat.setText("Coat: ")
+            self.lblSex.setText("Sex: ")
+            self.lblAge.setText('Age: ')
+            self.lblStock.clear()
+            self.linePrice.setText('0.00')
+            self.linePrice.setEnabled(True)
+            self.lineComission.lineValue.setText('0.00')
+            self.lineComission.setEnabled(True)
+            self.lineSharePrice.setText('0.00')
+            self.lineNetPrice.setText('0.00')
+            self.lineSharePrice.setText('0.00')
+            self.lineNumber.clear()
+            self.lineNumber.setEnabled(True)
+            self.comboRepresentative.setCurrentIndex(-1)
+            self.comboRepresentative.setEnabled(True)
+            self.comboDealer.setCurrentIndex(-1)
+            self.comboDealer.setEnabled(True)
+            self.comboBuyer.setCurrentIndex(-1)
+            self.comboBuyer.setEnabled(True)
+            self.comboDocument.setCurrentIndex(-1)
+            self.comboDocument.setEnabled(True)
+            self.comboType.setCurrentIndex(-1)
+            self.comboType.setEnabled(True)
+            self.comboPurpose.setCurrentIndex(-1)
+            self.comboPurpose.setEnabled(True)
+            self.textNotes.clear()
+            self.textNotes.setEnabled(True)
+            self.pushSave.setEnabled(False)
+            if self.mode == APM.OPEN_NEW:
+                self.setWindowTitle("Sales")
+            else:
+                self.setWindowTitle("Edit Sales")
+                self.pushReset.setEnabled(False)
+                self.pushDelete.setEnabled(False)
+        except AttributeError as err:
+            print('ClearData', err.args)
 
     def enableSave(self):
         if self.isVisible():
@@ -1943,12 +1972,18 @@ class Sales(QDialog):
             if (isinstance(send_object, FocusCombo) \
                 or isinstance(send_object, QDateEdit) \
                 or isinstance(send_object, QTextEdit) \
-                or isinstance(send_object, QLineEdit)) \
+                or isinstance(send_object, QLineEdit)
+                or isinstance(send_object, APM.TableViewAndModel)) \
                     and self.dateOfSale.text != 'None' \
                     and len(self.lblHorse.text()) > 2  \
                     and (self.comboBuyer.currentIndex() != -1 \
                     and self.comboRepresentative.currentIndex() != -1\
-                    and float(self.lineNetPrice.text()) !=  0 ):
+                    and self.comboPurpose.currentIndex() != -1\
+                    and self.comboDealer.currentIndex() != -1\
+                    and self.comboType.currentIndex() != -1
+                    and self.comboDocument.currentIndex() != -1\
+                    and len(self.lineNumber.text()) > 2\
+                    and float(self.lineNetPrice.text()) >=  0 ):
                 self.pushSave.setEnabled(True)
 
     def setTableViewAndModel(self):
@@ -1967,170 +2002,141 @@ class Sales(QDialog):
                 3: ("Sex", False, True, True, None),
                 4: ("Age", False, True, False, None),
                 5: ("AgrID", True, True, True, None),
-                6: ("Active", True, True, True, None),
-                7: ("SexStr", True, True, False, None),
-                8: ("ahid", True, True, True, None),
-                9: ("horseid", True, True, True, None),
-                10: ("baseamount", True, True, False, None),
-                11:("firstfrom", True, True, False, None),
-                12:("firtto", True, False, False, False, None),
-                13:("secondfrom", True, False, False, False, None),
-                14:("secondto", True, False, False, False, None),
-                15:("thirdfrom", True, False, False, False, None),
-                16:("thirdto", True, False, False, False, None),
-                17:("finalamount", True, False, False, False, None),
-                18:("basepercent", True, False, False, False, None),
-                19:("firstpercent", True, False, False, False, None),
-                20:("secondpercent", True, False, False, False, None),
-                21:("thirdpercent", True, False, False, False, None),
-                22:("finalpercent", True, False, False, False, None)}
-            qry = self.getHorsesQuery()
-            table = APM.TableViewAndModel(colDict, colorDict, (500, 100), qry)
-
+                6: ("SexStr", True, True, False, None),
+                7: ("ahid", True, True, None),
+                8: ("horseid", True, True, True, None),
+                9: ("baseamount", True, True, False, None),
+                10:("firstfrom", True, True, False, None),
+                11:("firtto", True, False, False, False, None),
+                12:("secondfrom", True, False, False, False, None),
+                13:("secondto", True, False, False, False, None),
+                14:("thirdfrom", True, False, False, False, None),
+                15:("thirdto", True, False, False, False, None),
+                16:("finalamount", True, False, False, False, None),
+                17:("basepercent", True, False, False, False, None),
+                18:("firstpercent", True, False, False, False, None),
+                19:("secondpercent", True, False, False, False, None),
+                20:("thirdpercent", True, False, False, False, None),
+                21:("finalpercent", True, False, False, False, None),
+                22:("Agreementtype", True, True, False,False, None),
+                23:("saleid", True, False, False, None),
+                24:("DOS", True, True, False, None),
+                25:("Buyerid", True, True, False, None),
+                26:("Dealerid", True, True, False, None),
+                27:("responsibleid", True, True, False, None),
+                28:("destinationid", True, True, False, None),
+                29:("type", True, True, False, None),
+                30:("Price", True, True, False, None),
+                31:("comissionpercent", True, True, False, None),
+                32:("comission", True, True, False, None),
+                33:("expenses", True, True, False, None),
+                34:("documenttype", True, True, False, None),
+                35:("documentnumber", True, True, False, None),
+                36:("Notes", True, True, False, None)}
+            #qry = self.getHorsesQuery()
+            table = APM.TableViewAndModel(colDict, colorDict, (500, 100), self.qryLoad)
             return table
         except Exception as err:
             print(type(err).__name__, err.args)
             raise APM.DataError(type(err).__name__, err.args)
 
-    def getHorsesQuery(self):
-        try:
-            with Cdatabase(self.db, "AgreementHorses") as db:
-                qry = QSqlQuery(db)
-                qry.prepare(""" SELECT h.rp, 
-                h.name Horse, c.coat, 
-                CASE
-                    WHEN h.sexid = 1 THEN _ucs2 x'2642'
-                    WHEN h.sexid = 2 THEN _ucs2 x'2640'
-                    WHEN h.sexid = 3 THEN _ucs2 x'265E'
-                END Sex,
-                CONCAT(TIMESTAMPDIFF(YEAR, h.dob, CURDATE()), ' years') Age,
-                ah.agreementid, ah.active, s.sex,
-                ah.id agreemenhorseid, h.id horseid,
-                sac.salebaseAmount,
-                sac.salefirstfrom,
-                sac.salefirstto,
-                sac.salesecondfrom,
-                sac.salesecondto,
-                sac.salethirdfrom,
-                sac.salethirdto,
-                sac.saleFinal,
-                sac.salebasepercent,
-                sac.salefirstpercent,
-                sac.salesecondpercent,
-                sac.salethirdpercent,
-                sac.salefinalpercent
-                FROM horses AS h
-                INNER JOIN coats AS c
-                ON h.coatid = c.id
-                INNER JOIN sexes AS s
-                ON h.sexid = s.id
-                INNER JOIN agreementhorses AS ah
-                ON h.id = ah.horseid
-                INNER JOIN agreements AS a
-                ON ah.agreementid = a.id
-                LEFT JOIN agreementsaleconditions AS sac
-                ON a.id = sac.agreementid
-                WHERE ah.active AND ah.agreementid = ?
-                ORDER BY h.name
-                """)
-                qry.addBindValue(QVariant(self.agreementId))
-                qry.exec()
-                if qry.lastError().type() != 0:
-                    raise APM.DataError("getHorseQuery", qry.lastError().text())
-                if qry.size() == 0 :
-                    raise APM.DataError("getHorseQuery","There are not active horses")
-                return qry
-        except APM.DataError as err:
-            QMessageBox.warning(self, err.source, err.message)
-            raise APM.DataError(err.source, err.message)
-            return
 
     def loadCombos(self):
-        with Cdatabase(self.db, 'combos_2') as db:
-            qryBuyer= QSqlQuery(db)
+        try:
+            qryBuyer= QSqlQuery(self.db)
             qryBuyer.exec_("SELECT id, fullname FROM contacts WHERE buyer ORDER BY fullname")
             modelBuyer = QSqlQueryModel()
             modelBuyer.setQuery(qryBuyer)
             self.comboBuyer.setModel(modelBuyer)
             self.comboBuyer.setModelColumn(1)
             self.comboBuyer.setCurrentIndex(-1)
+            if qryBuyer.lastError().type() != 0:
+                raise APM.DataError("Load Combos", qryBuyer.lastError().text())
 
-            qryDealer = QSqlQuery(db)
+            qryDealer = QSqlQuery(self.db)
             qryDealer.exec("SELECT id, fullname FROM contacts WHERE dealer ORDER BY fullname")
             modelDealer = QSqlQueryModel()
             modelDealer.setQuery(qryDealer)
             self.comboDealer.setModel(modelDealer)
             self.comboDealer.setModelColumn(1)
             self.comboDealer.setCurrentIndex(-1)
+            if qryDealer.lastError().type() != 0:
+                raise APM.DataError("Load Combos", qryDealer.lastError().text())
 
-            qryRepresentative = QSqlQuery(db)
-            qryRepresentative.exec("SELECT id, fullname FROM contacts WHERE responsible ORDER BY fullname")
-            modelRepresentative = QSqlQueryModel()
+            qryRepresentative = QSqlQuery(self.db)
+            qryRepresentative.exec_("SELECT id, fullname FROM contacts WHERE responsible ORDER BY fullname")
+            modelRepresentative= QSqlQueryModel()
             modelRepresentative.setQuery(qryRepresentative)
             self.comboRepresentative.setModel(modelRepresentative)
             self.comboRepresentative.setModelColumn(1)
             self.comboRepresentative.setCurrentIndex(-1)
+            if qryRepresentative.lastError().type() != 0:
+                raise APM.DataError("Load Combos", qryRepresentative.lastError().text())
+        except APM.DataError as err:
+            print(err.source, err.message)
 
     def getHorseData(self):
         try:
             self.clearData()
-            if self.mode is None:
-                modelHorses = self.tableHorses.model()
-                row = self.tableHorses.currentIndex().row()
-                modelHorses.query().seek(row)
-                record = modelHorses.query().record()
-                self.record = record
-                self.setWindowTitle("{}'s Sale Registry". format(record.value(1)))
-                res = QMessageBox.question(self,"Sales", "Register {} sale ?".format(record.value(1)))
-                if res == QMessageBox.Yes:
-                    self.lblRp.setText(self.lblRp.text() + record.value(0))
-                    self.lblHorse.setText(self.lblHorse.text() + record.value(1))
-                    self.lblCoat.setText(self.lblCoat.text() + record.value(2))
-                    self.lblSex.setText(self.lblSex.text() + record.value(7))
-                    self.lblAge.setText(self.lblAge.text() + record.value(4))
-                    if not record.value(18) is None:
-                        self.saleDict['Base'] = (record.value(18), 0, record.value(10))
-                        if record.value(19) > 0 :
-                            self.saleDict['First'] = (record.value(19),record.value(11), record.value(12))
-                        if record.value(20) > 0 :
-                            self.saleDict['Second'] = (record.value(20),record.value(13), record.value(14))
-                        if record.value(21) > 0 :
-                            self.saleDict['Third'] = (record.value(21),record.value(15), record.value(16))
-                        if record.value(22) > 0:
-                            self.saleDict['Open']= (record.value(22),record.value(17), 1000000.00)
+            modelHorses = self.tableHorses.model()
+            row = self.tableHorses.currentIndex().row()
+            modelHorses.query().seek(row)
+            record = modelHorses.query().record()
+            self.record = record
+            self.lblRp.setText(self.lblRp.text() + record.value(0))
+            self.lblHorse.setText(self.lblHorse.text() + record.value(1))
+            self.lblCoat.setText(self.lblCoat.text() + record.value(2))
+            self.lblSex.setText(self.lblSex.text() + record.value(6))
+            self.lblAge.setText(self.lblAge.text() + str(record.value(4)))
+            if not record.value(17) is None:
+                self.saleDict['Base'] = (record.value(17), 0, record.value(9))
+            if record.value(18) > 0 :
+                self.saleDict['First'] = (record.value(18),record.value(10), record.value(11))
+            if record.value(19) > 0 :
+                self.saleDict['Second'] = (record.value(19),record.value(12), record.value(13))
+            if record.value(20) > 0 :
+                self.saleDict['Third'] = (record.value(20),record.value(14), record.value(15))
+            if record.value(21) > 0:
+                self.saleDict['Open']= (record.value(21),record.value(16), 1000000.00)
+            if self.mode == APM.OPEN_NEW:
+                self.setWindowTitle("{}'s Sale Registry".format(record.value(1)))
+                res = QMessageBox.question(self, "Sales", "Register {}'s sale?".format(record.value(1)))
+                if res != QMessageBox.Yes:
+                    self.clearData()
+                    return
             else:
-                self.setWindowTitle("{} Sale". format(self.record.value(2)))
-                self.lblRp.setText(self.lblRp.text() + self.record.value(1))
-                self.lblHorse.setText(self.lblHorse.text() + self.record.value(2))
-                self.lblCoat.setText(self.lblCoat.text() + self.record.value(7))
-                self.lblSex.setText(self.lblSex.text() + self.record.value(6))
-                self.lblAge.setText(self.lblAge.text() + self.record.value(4))
-                self.dateOfSale.setDate(self.record.value(0))
+                self.setWindowTitle("Edit/Delete {}'s Sale record". format(self.record.value(1)))
+                res = QMessageBox.question(self, "Sales", "Edit {}'s sale record?".format(record.value(1)))
+                if res != QMessageBox.Yes:
+                    self.clearData()
+                    return
+                self.pushReset.setEnabled(True)
+                self.pushDelete.setEnabled(True)
+                self.dateOfSale.setDate(self.record.value(24))
+                self.comboBuyer.setCurrentIndex(self.comboBuyer.seekData(self.record.value(25),0))
+                self.comboDealer.setCurrentIndex(self.comboDealer.seekData(self.record.value(26),0))
+                self.comboRepresentative.setCurrentIndex(self.comboRepresentative.seekData(self.record.value(27),0))
+                self.comboPurpose.setCurrentIndex(self.comboPurpose.seekData(self.record.value(28),0))
+                self.comboType.setCurrentIndex(self.comboType.seekData(self.record.value(29),0))
+                self.comboDocument.setCurrentIndex(self.comboDocument.seekData(self.record.value(34),0))
 
-                self.comboBuyer.seekData(self.record.value(23))
-                self.comboDealer.seekData(self.record.value(24))
-                self.comboRepresentative.seekData(self.record.value(25))
-                self.comboPurpose.seekData(self.record.value(26))
-                self.comboType.seekData(self.record.value(27))
-                self.comboDocument.seekData(self.record.value(31))
+                self.lineComission.lineValue.setText(str(self.record.value(33)))
+                self.linePrice.setText(str(self.record.value(30)))
+                self.lineSharePrice.setText(str(self.record.value(32)))
+                self.lineNumber.setText(str(self.record.value(35)))
 
-                self.lineComission.lineValue.setText(str(self.record.value(30)))
-                self.linePrice.setText(str(self.record.value(5)))
-                self.lineSharePrice.setText(str(self.record.value(29)))
-                self.lineNumber.setText(str(self.record.value(32)))
-
-                if self.record.value(28) > 0:
-                    netIncome = self.record.value(5) - self.record.value(30) - self.record.value(29)
+                if self.record.value(30) > 0:
+                    netIncome = self.record.value(30) - self.record.value(33) - self.record.value(32)
                     self.lineNetPrice.setText(str(netIncome))
-                    shareResult = "Player's {}% share on ${} Net Sale Income".format(str(self.record.value(28) * 100),
-                                                                                     str(self.record.value(5) -
-                                                                                         self.record.value(30)))
+                    shareResult = "Player's {}% share on ${} Net Sale Income".format(str(self.record.value(31) * 100),
+                                                                                     str(self.record.value(30) -
+                                                                                         self.record.value(33)))
                     self.lblStock.setText(shareResult)
                     self.lblStock.setStyleSheet("QLabel {color: red; background-color: yellow;}")
                 else:
                     self.lblStock.setText('')
 
-                self.textNotes.setText(self.record.value(33))
+                self.textNotes.setText(self.record.value(36))
 
         except Exception as err:
             print(type(err).__name__, err.args)
@@ -2151,163 +2157,137 @@ class Sales(QDialog):
         - Checks agreement for active horses and if not found any, desactivate the
         agreement.
         """
+
         try:
-            self.comboBuyer.setModelColumn(0)
-            self.comboDealer.setModelColumn(0)
-            self.comboRepresentative.setModelColumn(0)
-            self.comboDocument.setModelColumn(0)
-            self.comboPurpose.setModelColumn(0)
-            self.comboType.setModelColumn(0)
-            cnn = pymysql.connect(**self.con_string)
-            cnn.begin()
-            with cnn.cursor() as cur:
-                if self.mode is None:
-                    agreementHorseId = self.record.value(8)
-                    horseId = self.record.value(9)
-
-                    sql_sales = """ INSERT INTO sales
-                              (dos, agreementhorseid, buyerid, dealerid, responsibleid, 
-                              destinationid, typeid, price, comissionpercent, comission, expenses,
-                               documentid, documentnumber, notes)
-                              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-
-                else:
-                    agreementHorseId = self.record.value(8)
-                    horseId = self.record.value(9)
-                    sql_sales = """ UPDATE sales
-                              SET dos = %s, agreementhorseid = %s, buyerid = %s,
-                              dealerid = %s, responsibleid = %s, destinationid = %s, 
-                              typeid = %s, price = %s, comissionpercent = %s ,
-                              comission = %s, expenses = %s,
-                              documentid = %s, documentnumber = %s, notes = %s
-                              WHERE id = %s """
-                parameters = [self.dateOfSale.date.toString('yyyy-MM-dd'),
-                              agreementHorseId,
-                              self.comboBuyer.currentText(),
-                              self.comboDealer.currentText() if self.comboDealer.currentText().isdigit() else None,
-                              self.comboRepresentative.currentText(),
-                              self.comboPurpose.currentText() if self.comboPurpose.currentText().isdigit() else None,
-                              self.comboType.currentText() if self.comboType.currentText().isdigit() else None,
-                              float(self.linePrice.text()),
-                              self.sharePercent,
-                              float(self.lineSharePrice.text()),
-                              self.saleExpenses,
-                              self.comboDocument.currentText() if self.comboDocument.currentText().isdigit() else None,
-                              self.lineNumber.text(),
-                              self.textNotes.toPlainText()]
-                if self.mode is not None:
-                    parameters.append(self.record.value(34))
-                cur.execute(sql_sales, parameters)
-                saleid = cur.lastrowid if self.mode is None else self.record.value(34)
-                if self.mode is None:
-                    sql_horses = """ UPDATE horses 
-                          SET active = False
-                          WHERE id = %s"""
-                    cur.execute(sql_horses, [horseId])
-                    horseUpdate = cur.rowcount
-                    sql_agreementhorses = """ UPDATE agreementhorses
-                          SET active = False 
-                          WHERE id = %s"""
-                    cur.execute(sql_agreementhorses, (agreementHorseId,))
-
-                    """ include accountsPayable insert query"""
-                    sql_payables = """INSERT INTO payables 
-                    (agreementhorseid, concept, amount, ticketid, typeid)
-                    VALUES( %s, %s, %s, %s, %s)"""
-                    concept = "Player share {}% on ${} {} net sale".format(
-                                self.sharePercent * 100, float(self.linePrice.text())
-                                                         - self.saleExpenses,self.record.value(1))
-                    parameters = [self.record.value(1),
-                        concept,
-                        float(self.lineSharePrice.text()),
-                        saleid,
-                        APM.PAYABLES_TYPE_SALE]
-                    cur.execute(sql_payables, parameters)
-                    """It checks for active horses in agreementhorses for this particular
-                                    agreement and if it does'nt find any desactivate - active = False - the agreement"""
-                    sql_check_Agreement = """
-                                                    UPDATE agreements  a
-                                                    SET active = False,
-                                                    deactivationdate = %s 
-                                                    WHERE NOT EXISTS (SELECT ah.id FROM agreementHorses  ah 
-                                                                        WHERE ah.active AND ah.agreementid = a.id)
-                                                    AND a.id = %s"""
-                    parameters = [self.dateOfSale.date.toString("yyyy-MM-dd"), self.agreementId]
-                    cur.execute(sql_check_Agreement, parameters)
-                else:
-                    sql_update_payables = """
-                    UPDATE payables 
-                    SET concept = %s, amount = %s
-                    WHERE 
-                    typeid = 2
-                    AND ticketid = %s"""
-                    concept = "Player share {}% on ${} {} net sale".format(
-                        self.sharePercent * 100, float(self.linePrice.text()) - self.saleExpenses,self.record.value(2))
-                    parameters = [concept,
-                                  float(self.lineSharePrice.text()),
-                                  saleid]
-                    cur.execute(sql_update_payables, parameters)
-
-                cnn.commit()
-                """Resets the sale list for this particular agreement on           
-                    the main form subform"""
-                mainQuery = self.parent.querySales()
-                if mainQuery.size() >= 0:
-                    self.parent.dockSales.widget().model().setQuery(mainQuery)
-                """Clear the form for the next record to be entered"""
-                self.clearData()
-                """Resets the  active horses list for this particular agreement"""
-                if self.mode is None:
-                    try:
-                        self.tableHorses.model().setQuery(self.getHorsesQuery())
-                        return
-                    except APM.DataError:
-                        self.close()
-                        return
-                self.close()
+            if self.mode == APM.OPEN_NEW:
+                saleid = 'NULL'
+            else:
+                saleid = self.record.value(23)
+            qry = QSqlQuery(self.db)
+            qry.exec("""CALL sales_sale({}, {}, '{}', {}, {}, {}, {}, {}, {}, {},
+                         {}, {}, {}, {}, '{}', '{}', {},  "{}", {})""".format(
+                    self.mode,
+                    self.agreementId,
+                    self.dateOfSale.date.toString("yyyy-MM-dd"),
+                    self.record.value(7),
+                    self.comboBuyer.getHiddenData(0),
+                    self.comboDealer.getHiddenData(0),
+                    self.comboRepresentative.getHiddenData(0),
+                    self.comboPurpose.getHiddenData(0),
+                    self.comboType.getHiddenData(0),
+                    float(self.linePrice.text()),
+                    float(self.sharePercent),
+                    float(self.lineSharePrice.text()),
+                    float(self.saleExpenses),
+                    self.comboDocument.getHiddenData(0),
+                    self.lineNumber.text(),
+                    self.textNotes.toPlainText(),
+                    self.record.value(8),
+                    self.lblStock.text(),
+                    saleid))
+            if qry.lastError().type() != 0:
+                if qry.lastError().number() == 2013:
+                    raise APM.DataError(qry.lastError().number())
+                raise APM.DataError("saveAndClose", qry.lastError().text())
+            if qry.first():
+                print(qry.value(0), qry.value(1))
+            self.clearData()
+            self.resetTables()
+        except APM.DataError as err:
+            if not err.source == 2013:
+                print(err.source, err.message)
                 return
-        except pymysql.Error as e:
-            QMessageBox.warning(self, "saveAndClose", "Error {}: {}".format(e.args[0], e.args[1]))
-            cnn.rollback()
-        except AttributeError as err:
-            print(err.args)
-            cnn.rollback()
-        except Exception as err:
-            QMessageBox.warning(self, "Error : {}".format(type(err).__name__), err.args[0])
-            print(type(err).__name__, err.args)
-            cnn.rollback()
-        finally:
-            cnn.close()
-            self.comboBuyer.setModelColumn(1)
-            self.comboDealer.setModelColumn(1)
-            self.comboRepresentative.setModelColumn(1)
-            self.comboDocument.setModelColumn(1)
-            self.comboPurpose.setModelColumn(1)
-            self.comboType.setModelColumn(1)
+            count = 0
+            while not self.db.isOpen():
+                self.reconnect()
+                count += 1
+                if count >= 10: break
+
+    def reconnect(self):
+        ok, self.db = Settings.connectionTest()
+
+    def resetTables(self):
+        try:
+            qrySales = self.parent.querySales()
+            self.parent.dockSales.widget().model().setQuery(qrySales)
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL sales_gethorses({}, {})".format(self.agreementId, self.mode))
+            if qry.lastError().type() != 0:
+                raise APM.DataError("getHorsesQuery", qry.lastError().text())
+            if not qry.first():
+                raise APM.DataError("getHorsesQuery", "There is not available data")
+            self.tableHorses.model().setQuery(qry)
+        except APM.DataError as err:
+            print(err.source, err.message)
+            self.close()
 
     @pyqtSlot()
     def saleResults(self):
 
+        netPrice = 0.00
         if float(self.linePrice.text()) > 0:
             if self.lineComission.percent:
                 self.saleExpenses = float(self.linePrice.text()) * float(self.lineComission.value)/100
             else:
                 self.saleExpenses = float(self.lineComission.value)
-            netPrice = float(self.linePrice.text()) - self.saleExpenses
             sharePercent = 0.0
-            for key, value in self.saleDict.items():
-                if value[1] <= netPrice <= value[2]:
-                    sharePercent = value[0]
-                    break
-            sharedPrice = netPrice * sharePercent
-            netPrice = netPrice - sharedPrice
-            self.lineSharePrice.setText(str(sharedPrice))
-            self.lineNetPrice.setText(str(netPrice))
-            shareResult = "Player's {}% share on ${} Net Sale Income".format(str(sharePercent * 100),
-                                                                               str(float(self.linePrice.text()) - self.saleExpenses))
-            self.lblStock.setText(shareResult)
-            self.sharePercent = sharePercent
+            if self.record.value(22) == APM.AGREEMENT_TYPE_BREAKING:
+                QMessageBox.information(self, "Sales", "Currently sales are not schedule for plain 'Breaking agreements'",
+                                        QMessageBox.Ok)
+                return
+            elif self.record.value(22) in [APM.AGREEMENT_TYPE_FULL, APM.AGREEMENT_TYPE_PLAY]:
+                netPrice = float(self.linePrice.text()) - self.saleExpenses
+                for key, value in self.saleDict.items():
+                    if value[1] <= netPrice <= value[2]:
+                        sharePercent = value[0]
+                        break
+                shareResult = "Player's {}% share on ${} Net Sale Income".format(str(sharePercent * 100),
+                                                                                 str(netPrice))
+            elif self.record.value(22) == APM.AGREEMENT_TYPE_OVER_BASE:
+                if float(self.linePrice.text()) >= (self.saleExpenses + self.record.value(9)):
+                    netPrice = float(self.linePrice.text()) - self.saleExpenses - self.record.value(9)
+                else:
+                    netPrice = 0
+                for key, value in self.saleDict.items():
+                    if value[1] - self.record.value(9) <= netPrice <= value[2] - self.record.value(9):
+                        sharePercent = value[0]
+                        break
+                shareResult = "Player's {}% share on ${} Net Sale Income over ${} base amount".format(
+                    str(sharePercent * 100), str(netPrice), self.record.value(9))
+            elif self.record.value(22) == APM.AGREEMENT_TYPE_OVER_EXPENSES:
+                shareExpense = self.record.value(11) - self.record.value(9)
+                if float(self.linePrice.text()) >= (self.saleExpenses + self.record.value(11)):
+                    netPrice = float(self.linePrice.text()) - self.saleExpenses - self.record.value(11)
+                else:
+                    if float(self.linePrice.text()) >= self.saleExpenses + self.record.value(9):
+                        shareExpense = float(self.linePrice.text()) - self.saleExpenses - self.record.value(9)
+                    else:
+                        shareExpense = 0
+                    netPrice = 0
+                for key, value in self.saleDict.items():
+                    if value[1] - self.record.value(11) <= netPrice <= value[2] - self.record.value(11):
+                        sharePercent = value[0]
+                        break
+                shareResult = "Player's ${} expenses plus {}% share on ${} Net Sale Income over ${} expenses".format(
+                    shareExpense, str(sharePercent * 100), str(netPrice),
+                    self.record.value(11))
 
+            self.lineSharePrice.setText(str(netPrice * sharePercent))
+
+
+            if self.record.value(22) in [APM.AGREEMENT_TYPE_PLAY, APM.AGREEMENT_TYPE_FULL]:
+                self.lineNetPrice.setText(str(netPrice - float(self.lineSharePrice.text())))
+                self.lineSharePrice.setText(str(netPrice * sharePercent))
+            elif self.record.value(22) == APM.AGREEMENT_TYPE_OVER_BASE:
+
+                self.lineNetPrice.setText(str(netPrice-float(self.lineSharePrice.text()) + self.record.value(9)))
+            elif self.record.value(22)== APM.AGREEMENT_TYPE_OVER_EXPENSES:
+                self.lineSharePrice.setText(str(shareExpense + netPrice * sharePercent))
+                self.lineNetPrice.setText(str(float(self.linePrice.text())- float(self.lineSharePrice.text()) -
+                                              self.saleExpenses))
+            self.lblStock.setText(shareResult)
+
+            self.sharePercent = sharePercent
 
     @pyqtSlot()
     def getComission(self):
@@ -2319,67 +2299,35 @@ class Sales(QDialog):
         """Requieres to:
             - Delete (delete) current record in sales table.
             - Update (Reverse) agreementhorses table - (active = True)
-            - Update (Reverse) horses table - (active = True).
+            - Update (Reverse) horses table - (active = True).deactivationdate = Null, Active 0 True
             - Deletes the entry in payable table
-            - Refresh the dockMortality query in the main form.
+            - Refresh the dockSales query in the main form.
             - Refresh this form horse query.
+            - Update - Reverse -Agreement table when all agreement horses are deactivates
             """
         try:
-            res = QMessageBox.question(self,"Delete Confirm",
-                                       "Delete {} sale from the records?" .format(self.record.value(2)),
+            res = QMessageBox.question(self,"Delete Confirm", """Delete records can't be recovered. 
+            Delete {}' sale from file?""" .format(self.record.value(1)),
                                        QMessageBox.Yes | QMessageBox.No)
-            if res == QMessageBox.Yes:
-                cnn = pymysql.connect(**self.con_string)
-                cnn.begin()
-                with cnn.cursor() as cur:
-                    sql_delete = """ DELETE FROM sales
-                    WHERE id = %s"""
-                    cur.execute(sql_delete, (self.record.value(34),))
-                    sql_delete_payable = """ DELETE FROM payables
-                    WHERE saleid = %s"""
-                    cur.execute(sql_delete_payable,(self.record.value(34),))
-                    sql_horses = """ UPDATE horses 
-                        SET active = True
-                        WHERE id = %s"""
-                    cur.execute(sql_horses, (self.record.value(9),))
-                    sql_agreementhorses = """ UPDATE agreementhorses
-                        SET active = True 
-                        WHERE id = %s"""
-                    cur.execute(sql_agreementhorses, (self.record.value(8),))
-                    """It checks for active horses in agreementhorses for this particular
-                    agreement and if it does'nt find any desactivate - active = False - the agreement"""
-                    sql_check_Agreement = """
-                        UPDATE agreements AS a
-                        SET active = True,
-                            deactivationdate = NULL
-                            WHERE EXISTS (SELECT ah.id FROM agreementHorses AS ah 
-                            WHERE ah.active AND ah.agreementid = a.id)
-                            AND a.id = %s"""
-                    parameters = [self.agreementId,]
-                    cur.execute(sql_check_Agreement, parameters)
-                    res = QMessageBox.question(self, "Confirmation",
-                                      "Are you sure?", QMessageBox.Yes|QMessageBox.Cancel)
-                    if res == QMessageBox.Yes:
-                        cnn.commit()
-                        """Resets the sale list for this particular agreement on
-                                   the main widget and closes the widget"""
-                        mainQuery = self.parent.querySales()
-                        if mainQuery.size() >= 0:
-                            self.parent.dockSales.widget().model().setQuery(mainQuery)
-                        self.close()
-                    else:
-                        cnn.rollback()
-        except pymysql.Error as e:
+            if res != QMessageBox.Yes:
+                return
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL sales_delete({},{},{},{})".format(self.record.value(23),
+                                                          self.record.value(7),
+                                                          self.record.value(8),
+                                                          self.record.value(5)))
+            if qry.lastError().type() !=0:
+                raise APM.DataError('deleteRecord', qry.lastError().text())
+            if qry.first():
+                print(qry.value(0), qry.value(1))
+            self.clearData()
+            self.resetTables()
+        except APM.DataError as e:
             QMessageBox.warning(self, "saveAndClose", "Error {}: {}".format(e.args[0], e.args[1]))
-            cnn.rollback()
         except AttributeError as err:
             print(err.args)
-            cnn.rollback()
         except Exception as err:
             print(type(err).__name__, err.args)
-            cnn.rollback()
-        finally:
-            cnn.close()
 
     @pyqtSlot()
     def enableEdit(self):
@@ -2422,8 +2370,8 @@ class Reject(QDialog):
               record : Current record from QDockRejection"""
 
 
-    def __init__(self, db, agreementid, mode = None,
-                 record = None, con_string = None ,parent = None):
+    def __init__(self, db, agreementid, mode=None,
+                 record=None, con_string=None ,parent=None):
         super().__init__()
         self.db = db
         self.parent = parent
@@ -2577,7 +2525,8 @@ class Reject(QDialog):
             if (isinstance(send_object, FocusCombo) \
                 or isinstance(send_object, QDateEdit) \
                 or isinstance(send_object, QTextEdit) \
-                or isinstance(send_object, QLineEdit)) \
+                or isinstance(send_object, QLineEdit)
+                or isinstance(send_object, APM.TableViewAndModelTable)) \
                     and self.dor.text != 'None' \
                     and (self.comboRejector.currentIndex() != -1 \
                          or self.comboCause.currentIndex() != -1):
@@ -2633,7 +2582,7 @@ class Reject(QDialog):
                 ON h.sexid = s.id
                 INNER JOIN agreementhorses as ah
                 ON h.id = ah.horseid
-                WHERE ah.active AND ah.agreementid = ?
+                WHERE ah.billable AND ah.agreementid = ?
                 ORDER BY h.name
                 """)
                 qry.addBindValue(QVariant(self.agreementId))
@@ -2713,6 +2662,7 @@ class Reject(QDialog):
     def saveAndClose(self):
         """Requieres to:
         - Save (Insert) new record in rejection table.
+        - Insert ne record in clearance table
         - Update agreementhorses table - (active = False)
         - Update horses table - (active = False).
         - Refresh the dockRejection query in the main form.
@@ -2732,6 +2682,10 @@ class Reject(QDialog):
                     sql_reject = """ INSERT INTO rejection
                               (dor, agreementhorseid, typeid, causeid, rejectorid, notes)
                               VALUES (%s, %s, %s, %s, %s, %s)"""
+
+                    sql_Clearence = """INSERT INTO clearance 
+                    (agreementhorseid, reasonid, typeid)
+                    VALUES(%s, %s, %s)"""
                 else:
                     agreementHorseId = self.record.value(15)
                     horseId = self.record.value(14)
@@ -2745,16 +2699,18 @@ class Reject(QDialog):
                               self.comboCause.currentText(),
                               self.comboRejector.currentText(),
                               self.textNotes.toPlainText()]
+                paramClearance = (self.record.value(8), CLEARENCE_REASON_REJECT, self.comboType.currentText())
                 if self.mode is not None:
                     parameters.append(self.record.value(13))
                 cur.execute(sql_reject, parameters)
+                cur.execute(sql_Clearence, paramClearance)
                 if self.mode is None:
                     """Updates the agreementhorses table"""
                     sql_agreementhorses = """ UPDATE agreementhorses
-                                            SET active = False 
+                                            SET billable = False 
                                             WHERE id = %s"""
                     cur.execute(sql_agreementhorses, (agreementHorseId,))
-                    if self.comboType.currentText() != '2':
+                    if self.comboType.currentText() != REJECTION_TYPE_TRANSITORY:
                         """If the rejection is permanentt removes - set active = false -
                         both the agreementhorses table and the horses table, otherwise it
                         only set active = false to the agreementhorse table removing the
@@ -2777,6 +2733,9 @@ class Reject(QDialog):
                     parameters = [self.dor .date.toString("yyyy-MM-dd"), self.agreementId]
                     cur.execute(sql_check_Agreement, parameters)
                 cnn.commit()
+                self.comboRejector.setModelColumn(1)
+                self.comboCause.setModelColumn(1)
+                self.comboType.setModelColumn(1)
         except pymysql.Error as e:
             QMessageBox.warning(self, "saveAndClose", "Error {}: {}".format(e.args[0], e.args[1]))
             cnn.rollback()
@@ -2788,11 +2747,9 @@ class Reject(QDialog):
             cnn.rollback()
         finally:
             cnn.close()
-            self.comboRejector.setModelColumn(1)
-            self.comboCause.setModelColumn(1)
-            self.comboType.setModelColumn(1)
 
-        """Resets the mortality list for this particular agreement on
+
+        """Resets the rejected list for this particular agreement on
             the main form subform"""
         mainQuery = self.parent.queryRejected()
         if mainQuery.size() >= 0 and self.agreementId:

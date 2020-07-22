@@ -7,10 +7,11 @@ from PyQt5.QtCore import Qt, QDate, QEvent, pyqtSlot, QVariant
 from PyQt5.QtGui import  QStandardItem, QDoubleValidator, QIntValidator, QMouseEvent
 from PyQt5.QtSql import QSqlDatabase, QSqlQuery,QSqlError, QSqlQueryModel
 from ext.socketclient import  RequestHandler
-from ext.SpinFocus import FocusSpin
+#from ext.SpinFocus import FocusSpin
 from ext.ListPicker import PickerWidget
 from ext.Contacts import Contacts
 from ext import APM
+from ext.APM import FocusSpin
 from ext.Settings import SettingsDialog
 
 
@@ -45,6 +46,7 @@ class Agreement(QDialog):
         self.playOkToSave = None
         self.chooseSize = None
         self.agreementId = None
+        self.agreementType = 0
         self.filename = None
         self.setWindowTitle("New Play & Sale Agreement")
         self.setUi()
@@ -52,7 +54,7 @@ class Agreement(QDialog):
 
 
         #self.toggleBreaking()
-        self.radioAtEnd.setChecked(True)
+        #self.radioAtEnd.setChecked(True)
 
     def setUi(self):
         lblAgreement = QLabel("Agreement Title")
@@ -135,14 +137,15 @@ class Agreement(QDialog):
         btnNewContact.clicked.connect(self.newContact)
 
         self.radioAtEnd = QRadioButton("On Completion")
-        self.radioAtEnd.setChecked(True)
+        self.radioAtEnd.setChecked(False)
         self.radioAtEnd.toggled.connect(self.paymentOptionChanged)
 
         self.radioFee = QRadioButton("Monthly Installments")
-        self.radioAtEnd.toggled.connect(self.paymentOptionChanged)
+        self.radioFee.setChecked(True)
+        self.radioFee.toggled.connect(self.paymentOptionChanged)
 
         self.radioOnSite = QRadioButton("Monthly On Site Only")
-        self.radioAtEnd.toggled.connect(self.paymentOptionChanged)
+        self.radioOnSite.toggled.connect(self.paymentOptionChanged)
 
         self.groupPayment = QGroupBox("Payment Options")
         self.groupPayment.setCheckable(False)
@@ -156,7 +159,25 @@ class Agreement(QDialog):
         self.paymentOptions.setId(self.radioOnSite, 2)
         self.paymentOptions.buttonClicked.connect(self.checkOption)
 
+        radioBreaking = QRadioButton("Breaking")
+        radioBreaking.setChecked(True)
+        radioPlay = QRadioButton("Play and Sale")
+        radioOverBase = QRadioButton("Over Base")
+        radioFull = QRadioButton("Break and Play")
+        radioOverAll = QRadioButton("Over all")
 
+        self.agreementOption = QButtonGroup()
+        self.agreementOption.addButton(radioBreaking)
+        self.agreementOption.addButton(radioPlay)
+        self.agreementOption.addButton(radioFull)
+        self.agreementOption.addButton(radioOverBase)
+        self.agreementOption.addButton(radioOverAll)
+        self.agreementOption.setId(radioBreaking, 0)
+        self.agreementOption.setId(radioFull, 1)
+        self.agreementOption.setId(radioPlay, 2)
+        self.agreementOption.setId(radioOverBase, 3)
+        self.agreementOption.setId(radioOverAll,4)
+        self.agreementOption.buttonClicked[int].connect(self.getAgreementType)
 
         #Sales conditions
 
@@ -209,6 +230,7 @@ class Agreement(QDialog):
 
         self.spinSaleFirstPercent = FocusSpin()
         self.spinSaleFirstPercent.setEnabled(False)
+        self.spinSaleFirstPercent.setRange(0,100)
         self.spinSaleFirstPercent.valueChanged.connect(lambda: self.setLastPercent(self.spinSaleFirstPercent.value()))
         self.lineSaleSecondFrom = QLineEdit('0.00')
         self.lineSaleSecondFrom.setEnabled(False)
@@ -253,13 +275,22 @@ class Agreement(QDialog):
         self.picker = PickerWidget(False, db=self.db, con_string=self.parent.con_string,parent=self)
         self.picker.increase.connect(self.querySize)
 
+        agreementOptionLayout = QHBoxLayout()
+        agreementOptionLayout.addWidget(radioBreaking)
+        agreementOptionLayout.addWidget(radioFull)
+        agreementOptionLayout.addWidget(radioPlay)
+        agreementOptionLayout.addWidget(radioOverBase)
+        agreementOptionLayout.addWidget(radioOverAll)
+
+
         groupBasic = QGroupBox()
         groupBasicLayout = QGridLayout()
         groupBasicLayout.addWidget(lblAgreement,0,0)
         groupBasicLayout.addWidget(self.lineAgreement,0,1,1,-1)
         groupBasicLayout.addWidget(lblDate,1,0)
         groupBasicLayout.addWidget(self.dateEdit,1,1)
-        groupBasicLayout.addWidget(self.checkBreaking,1,2)
+        #groupBasicLayout.addWidget(self.checkBreaking,1,2)
+        groupBasicLayout.addLayout(agreementOptionLayout,1,3)
         groupBasicLayout.addWidget(lblSupplier,2,0)
         groupBasicLayout.addWidget(self.comboSupplier,2,1)
         groupBasicLayout.addWidget(lblResponsible,2,2)
@@ -338,19 +369,20 @@ class Agreement(QDialog):
         basicLayout.addSpacing(100)
 
         middleLayout = QHBoxLayout()
+        middleLayout.addWidget((self.groupPayment))
         middleLayout.addWidget(self.groupAmount)
         middleLayout.addWidget(self.groupSale)
-        middleLayout.addWidget((self.groupPayment))
+
 
         notesLayout = QVBoxLayout()
         notesLayout.addWidget(self.lblNotes)
         notesLayout.addWidget(self.textNotes)
 
         bottonLayout = QHBoxLayout()
-        bottonLayout.addSpacing(100)
+        #bottonLayout.addSpacing(100)
         bottonLayout.addWidget(self.picker)
         #bottonLayout.addLayout(notesLayout)
-        bottonLayout.addSpacing(100)
+        #bottonLayout.addSpacing(100)
 
         vLayout = QVBoxLayout()
         vLayout.addLayout(basicLayout)
@@ -364,6 +396,13 @@ class Agreement(QDialog):
 
         self.setLayout(vLayout)
         self.setMaximumSize(1000, 500)
+        self.toggleBreaking()
+
+    @pyqtSlot(int)
+    def getAgreementType(self, id):
+        self.agreementType = id
+        self.toggleBreaking()
+        return
 
     @pyqtSlot()
     def sendSupplier(self):
@@ -449,7 +488,7 @@ class Agreement(QDialog):
                         SET responsible = True 
                         WHERE id = ? """)
                 else:
-                    if self.checkBreaking.isChecked():
+                    if self.agreementType in [0,1]: #checkBreaking.isChecked():
                         qryUpdate.prepare("""UPDATE contacts 
                            SET  horsebreaker = True 
                            WHERE id = ? """)
@@ -489,6 +528,7 @@ class Agreement(QDialog):
             FROM Contacts
             WHERE playerseller = True
             AND active = True
+            AND NOT systemcontact
             ORDER BY fullname;""")
 
             self.qrybreaker = QSqlQuery(self.db)
@@ -497,6 +537,7 @@ class Agreement(QDialog):
             FROM Contacts
             WHERE horsebreaker = True
             AND active = True
+            AND NOT systemcontact
             ORDER BY fullname;""")
 
             self.qryresponsible = QSqlQuery(self.db)
@@ -684,33 +725,47 @@ class Agreement(QDialog):
 
     def toggleBreaking(self):
         try:
+            self.btnOk.setEnabled(False)
             self.lineAgreement.clear()
             self.modelSupplier.clear()
-            if self.checkBreaking.isChecked():
+            if self.agreementType == 0:
+                self.setWindowTitle("New Horse Breaking Agreement")
+                self.agreementTitle[1] = "- Horse Breaking Agreement - "
+            elif self.agreementType == 1:
+                self.setWindowTitle("New Horse Full Breaking & Playing Agreement")
+                self.agreementTitle[1] = "- Horse Full Breaking & Playing Agreement - "
+            elif self.agreementType == 2:
+                self.setWindowTitle("New Play & Sale Agreement")
+                self.agreementTitle[1] = "- Play & Sale Agreement - "
+            elif self.agreementType == 3:
+                self.setWindowTitle("New Play & Sale Over Base Agreement")
+                self.agreementTitle[1] = "- Play & Sale Over Base Agreement - "
+            else:
+                self.setWindowTitle("New Play & Sale Over Expenses Agreement")
+                self.agreementTitle[1] = "- Play & Sale Over Expenses Agreement - "
+
+            if self.agreementType in [0,1]: #isChecked():
                 if self.qrybreaker.size() < 1:
                     raise APM.DataError("Horse Breakers", "The Horse Breaker list is empty!")
                 self.modelSupplier.setQuery(self.qrybreaker)
-                self.setWindowTitle("New Horse Breaking Agreement")
-                self.agreementTitle[1] = "- Horse Breaking Agreement - "
-                self.groupSale.setChecked(False)
+                self.groupSale.setChecked(False) if self.agreementType == 0 else self.groupSale.setChecked(True)
                 self.spinMinimum.setEnabled(True)
-                self.radioFee.setChecked(False)
+                self.radioFee.setChecked(True)
             else:
                 if self.qryPlayer.size() < 1:
                     raise APM.DataError("Polo Player", "The Polo Player -Play&Sale- list is empty!")
                 self.modelSupplier.setQuery(self.qryPlayer)
-                self.setWindowTitle("New Play & Sale Agreement")
                 self.agreementTitle[1] = "- Play & Sale Agreement - "
                 self.groupSale.setChecked(True)
                 self.spinMinimum.setEnabled(False)
-                self.radioAtEnd.setChecked(True)
+                self.radioFee.setChecked(True)
             self.comboSupplier.setModelColumn(1)
             self.comboSupplier.setCurrentIndex(0)
             self.agreementTitle[0] = self.comboSupplier.currentText()
             self.agreementTitle[2] = self.dateEdit.date().toString("MM/dd/yyyy")
             self.changedDate()
             self.setAgreementTitle()
-            self.picker.breaking = self.checkBreaking.isChecked()
+            self.picker.breaking = True if self.agreementType in [0,1] else False
 
         except APM.DataError as err:
             raise APM.DataError(err.source, err.message)
@@ -723,6 +778,8 @@ class Agreement(QDialog):
         if self.isVisible():
             try:
                 idx = self.okToSave.index(None)
+                if self.agreementType == 1 and idx == 4:
+                    raise ValueError("Full")
             except ValueError as err:
                 if self.chooseSize is not None:
                     if self.chooseSize() > 0:
@@ -758,7 +815,7 @@ class Agreement(QDialog):
                                                              self.dateEdit.date().toString('yyyy-MM-dd'),
                                                              self.comboSupplier.getHiddenData(0),
                                                              self.comboResponsible.getHiddenData(0),
-                                                             self.checkBreaking.isChecked(),
+                                                             self.agreementType,
                                                              self.normalizeFloat(self.lineAmount),
                                                              self.spinInstallments.value(),
                                                              self.normalizeFloat(self.lineDownpayment),
@@ -821,6 +878,7 @@ class Agreement(QDialog):
             id = answer[2]
             self.agreementId = id
             self.filename = answer[1]
+            self.parent.filename = answer[1]
             self.accept()
             return answer[0]
         except ComunicationError as err:

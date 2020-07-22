@@ -5,17 +5,15 @@ from PyQt5.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
 from PyQt5.QtGui import (QTextDocument, QTextCursor, QStandardItemModel, QStandardItem,
                          QTextTableFormat, QTextLength, QIcon, QDoubleValidator,
                          QTextTableCellFormat, QTextCharFormat, QFont, QTextOption, QColor,
-                         QFocusEvent, QMouseEvent)
-from PyQt5.QtWidgets import (QTableView, QMessageBox, QHeaderView, QDateEdit, QPushButton, QToolButton,
-                             QLineEdit, QSpinBox, QWidget, QHBoxLayout, QComboBox, QApplication, QLabel,
-                             QPlainTextEdit)
-from PyQt5.QtCore import Qt, QVariant, pyqtSignal, pyqtSlot, QEvent, QObject
+                         QFocusEvent, QMouseEvent, QTextFrameFormat, QTextFrame)
+from PyQt5.QtWidgets import (QTableView, QMessageBox, QHeaderView, QDateEdit, QProgressDialog, QToolButton,
+                             QLineEdit, QSpinBox, QWidget, QHBoxLayout, QVBoxLayout, QComboBox, QApplication, QLabel,
+                             QPlainTextEdit, QAbstractItemView, QDialog, QTextEdit)
+from PyQt5.QtCore import (Qt, QVariant, pyqtSignal, pyqtSlot, QEvent, QObject, QTimer,QRunnable,
+                          QMetaObject, QThread, Q_ARG, Q_RETURN_ARG, QDate)
 from PyQt5.QtSql import QSqlQueryModel, QSqlDatabase, QSqlQuery
+import sys, traceback, time
 
-#from PyQt5 import QtGui
-import sys
-
-from PyQt5.QtCore import Qt, QDate
 DOWNPAYMENT = 0
 INSTALLMENT = 1
 FINAL_PAYMENT = 2
@@ -23,6 +21,12 @@ BREAKE_BALANCE = 3
 BREAKE_BASE = 4
 SALE_COMMISION = 5
 OTHER_PAYMENTS = 6
+
+AGREEMENT_TYPE_BREAKING = 0
+AGREEMENT_TYPE_FULL = 1
+AGREEMENT_TYPE_PLAY = 2
+AGREEMENT_TYPE_OVER_BASE = 3
+AGREEMENT_TYPE_OVER_EXPENSES = 4
 
 OPEN_NEW = 7
 OPEN_EDIT = 8
@@ -83,14 +87,50 @@ PAYABLES_TYPE_FULL_BREAK = 2
 PAYABLES_TYPE_HALF_BREAK = 3
 PAYABLES_TYPE_SALE = 4
 PAYABLES_TYPE_OTHER= 5
-PAYABLES_TYPE_ALL = 7
+PAYABLES_TYPE_ALL = 6
 
 PAYMENT_MODALITY_AT_END = 0
-PAYMANT_MODALITY_MONTHLY_FEE = 1
+PAYMENT_MODALITY_MONTHLY_FEE = 1
 PAYMENT_MODALITY_MONTHLY_ONSITEONLY = 2
+
+TEMP_RECORD_IN = 0
+TEMP_RECORD_OUT = 1
+
+PAYMENT_TYPE_CHECK = 0
+PAYMENT_TYPE_TRANSFER = 1
+PAYMENT_TYPE_CASH = 2
+
+PAYMENT_CURRENCY_USA = 0
+PAYMENT_CURRENCY_LOCAL = 1
+
+CLEARENCE_REASON_BREAK = 0
+CLEARENCE_REASON_REJECT = 1
 
 CURRENCY_USA_DOLAR = 0
 CURRENCY_ARGENTINE_PESO = 1
+
+OTHER_CONCEPT_TRANSPORTATION = 0
+OTHER_CONCEPT_VETERINARY = 1
+OTHER_CONCEPT_BLACKSMITH = 2
+OTHER_CONCEPT_TACK = 3
+OTHER_CONCEPT_CLUB_FEE = 4
+OTHER_CONCEPT_TOURNAMENT_FEE = 5
+OTHER_CONCEPT_STALLS = 6
+OTHER_CONCEPT_OTHER = 7
+
+INVOICE_TYPE_C = 0
+INVOICE_TYPE_A = 1
+
+BANCO_GALICIA = 0
+BANCO_NACION = 1
+BANCO_PROVINCIA = 2
+BANCO_SANTANDER = 3
+BANCO_COLUMBIA = 4
+BANCO_MACRO = 5
+BANCO_FRANCES = 6
+
+WHERE_CLAUSE_ONE = 0
+WHERE_CLAUSE_ALL = 1
 
 class Error(Exception):
     pass
@@ -162,106 +202,6 @@ class CreateDatabase():
         return True
 
 
-class ReportPrint():
-    def __init__(self, table, title, centerColumns, colWidths):
-        self.tableView = table
-        self.title = title
-        self.centerColumns = centerColumns
-        self.colWidths = colWidths
-
-    def handlePrint(self):
-        dialog = QPrintDialog()
-        if dialog.exec_():
-            self.handlePaintRequest(dialog.printer())
-
-    def handlePreview(self):
-        dialog = QPrintPreviewDialog()
-        dialog.paintRequested.connect(self.handlePaintRequest)
-        dialog.exec_()
-
-
-    def handlePaintRequest(self, printer):
-        visibleColumns = [x for x in range(self.tableView.model().columnCount()) if not self.tableView.isColumnHidden(x)]
-        document = QTextDocument()
-        cursor = QTextCursor(document)
-        cursor.select(QTextCursor.LineUnderCursor)
-        docCharFormat = QTextCharFormat()
-        docCharFormat.setFont(QFont('Helvetica', 20))
-        docCharFormat.setFontUnderline(True)
-        cursor.setBlockCharFormat(docCharFormat)
-        docBlockFormat = cursor.blockFormat()
-        docBlockFormat.setAlignment(Qt.AlignHCenter | Qt.AlignBottom)
-        cursor.setBlockCharFormat(docCharFormat)
-        cursor.setBlockFormat(docBlockFormat)
-        cursor.insertText(self.title + "\r\n")
-        blankCharFormat = QTextCharFormat()
-        blankCharFormat.setFontUnderline(False)
-        cursor.insertText("     ", blankCharFormat)
-
-        model = self.tableView.model()
-
-        table = cursor.insertTable(model.rowCount(), len(visibleColumns))
-        charFormat = QTextCharFormat()
-        charFormat.setFont(QFont('Helvetica', 8))
-        fmt = QTextTableFormat()
-        idWidth = QTextLength(QTextLength.FixedLength,45)
-        nameWidth = QTextLength()
-        dobWidth = QTextLength(QTextLength.FixedLength,100)
-        ageWith = QTextLength(QTextLength.FixedLength,45)
-        sexWidth = QTextLength(QTextLength.FixedLength,45)
-        coatWidth = QTextLength(QTextLength.FixedLength,120)
-        brokeWidth = QTextLength(QTextLength.FixedLength, 60)
-        activeWidth = QTextLength(QTextLength.FixedLength, 60)
-
-        fmt.setColumnWidthConstraints(self.colWidths)
-        fmt.setCellPadding(0)
-        fmt.setCellSpacing(0)
-        fmt.setAlignment(Qt.AlignCenter)
-        table.setFormat(fmt)
-        cellFormat = QTextTableCellFormat()
-        #table.setFrameFormat(fmt)
-        tableCol = 0
-        for x in range(model.columnCount()):
-            print(x, tableCol)
-            if x in visibleColumns:
-                tableCursor = table.cellAt(0, tableCol).firstCursorPosition()
-                blockFormat = tableCursor.blockFormat()
-                vAlign = blockFormat.alignment() & Qt.AlignVertical_Mask
-                align = Qt.AlignHCenter | vAlign
-                blockFormat.setAlignment(align)
-                tableCursor.setBlockFormat(blockFormat)
-                tableCursor.insertText(model.headerData(x, Qt.Horizontal), charFormat)
-                tableCursor.movePosition(QTextCursor.NextCell)
-                tableCol += 1
-        qry = model.query()
-        qry.first()
-        row = 1
-        while qry.next():
-            col = 0
-            rec = qry.record()
-            for x in range(rec.count()):
-                if x not in visibleColumns:
-                    continue
-                tableCursor = table.cellAt(row, col).firstCursorPosition()
-                blockFormat = tableCursor.blockFormat()
-                vAlign = blockFormat.alignment() & Qt.AlignVertical_Mask
-
-                if x in self.centerColumns:
-                    align = Qt.AlignHCenter
-                else:
-                    align = Qt.AlignLeft
-                blockFormat.setAlignment(align)
-                tableCursor.setBlockFormat(blockFormat)
-                tableCursor.insertBlock(blockFormat)
-                if type(rec.value(x)) is int:
-                    tableCursor.insertText(str(rec.value(x)), charFormat)
-                elif type(rec.value(x)) is QDate:
-                    tableCursor.insertText(rec.value(x).toString('MM-dd-yyyy'), charFormat)
-                else:
-                 tableCursor.movePosition(QTextCursor.NextCell)
-                col +=1
-            row += 1
-        document.print(printer)
 
 class QSqlAlignColorQueryModel(QSqlQueryModel):
     """QSqlQueryModel subclass allowing for :
@@ -294,9 +234,12 @@ class QSqlAlignColorQueryModel(QSqlQueryModel):
                 return QVariant()
             if self.query().seek(idx.row()):
                 qry = self.query().record()
+                value = qry.value(idx.column())
                 if role == Qt.DisplayRole:
-                    if isinstance(qry.value(idx.column()),float):
-                        return QVariant('{:.2f}'.format(round(qry.value(idx.column()), 2)))
+                    if isinstance(value,float):
+                        num = QVariant('{:.2f}'.format(round(value,2))) if value >= 0 else \
+                            QVariant("({:.2f})".format(abs(round(value,2))))
+                        return num
                     return QVariant(qry.value(idx.column()))
                 if role == Qt.TextAlignmentRole:
                     if idx.column() in self.centerColumns:
@@ -306,11 +249,16 @@ class QSqlAlignColorQueryModel(QSqlQueryModel):
                     return QVariant(Qt.AlignLeft)
                 if role == Qt.TextColorRole:
                     try:
+                        value = qry.value(idx.column())
+                        if isinstance(value, float) and value < 0:
+                            return QVariant(QColor("red"))
                         return QVariant(self.colorDict[qry.value(self.colorDict['column'])][1])
                     except KeyError:
                         return
                 if role == Qt.BackgroundColorRole:
                     try:
+                        if isinstance(value, float) and value < 0 :
+                            return QVariant(QColor("white"))
                         return QVariant(self.colorDict[qry.value(self.colorDict['column'])][0])
                     except KeyError:
                         return
@@ -342,12 +290,15 @@ class TableViewAndModel(QTableView):
 
     """
 
+    currentMove = pyqtSignal(int)
+
     def __init__(self, colDict, colorDict, size, qry=None):
         super().__init__()
         self.qry = qry
         self.colorDict = colorDict
         self.colDict = colDict
         self.size = size
+        self.installEventFilter(self)
         if self.qry is not None:
             self.setTable()
 
@@ -365,18 +316,28 @@ class TableViewAndModel(QTableView):
             [header.setSectionResizeMode(x, QHeaderView.ResizeToContents) if self.colDict[x][2] else
             header.setSectionResizeMode(x, QHeaderView.Stretch) for x in range(fields)]
             visibleColumns = len([x for x in range(fields) if not self.isColumnHidden(x)])
-            printColumnWidths = [QTextLength(QTextLength.FixedLength, self.colDict[x][4]) if
-                                 self.colDict[x][4] is not None else QTextLength() for x in range(visibleColumns)]
+            #printColumnWidths = [QTextLength(QTextLength.FixedLength, self.colDict[x][4]) if
+            #                     self.colDict[x][4] is not None else QTextLength() for x in range(visibleColumns)]
 
             self.verticalHeader().setVisible(False)
             self.verticalHeader().setDefaultSectionSize(25)
             self.horizontalHeader().setStyleSheet("QHeaderView { font-size: 8pt;}")
             self.setStyleSheet("TableViewAndModel {font-size: 8pt;}")
-            self.setMinimumSize(*self.size)
+            #self.setMinimumSize(*self.size)
+            self.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.setSelectionMode(QAbstractItemView.SingleSelection)
         except DataError as err:
             QMessageBox.warning(self,"DataError", err.message)
         except Exception as err:
             print(type(err).__name__, err.args)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Down:
+                self.currentMove.emit(self.currentIndex().row() + 1)
+            if event.key() == Qt.Key_Up:
+                self.currentMove.emit(self.currentIndex().row() +1)
+        return super().eventFilter(obj, event)
 
     @property
     def query(self):
@@ -478,10 +439,6 @@ class PercentOrAmountLineEdit(QWidget):
     def value(self):
         return self.lineValue.text()
 
-
-
-
-
 class NullDateEdit(QWidget):
     """Custom widget including a QDateEdit widget and a QpushButton
     intended to accept null dates from a record or by resetting the
@@ -517,6 +474,7 @@ class NullDateEdit(QWidget):
         self.clearButton.setStatusTip('Reset date to None')
         self.clearButton.setMaximumSize(30, 25)
         self.clearButton.clicked.connect(self.clearDate)
+
         self.dateEdit = QDateEdit()
         self.dateEdit.setMinimumWidth(120)
         self.dateEdit.setCalendarPopup(True)
@@ -595,9 +553,11 @@ class FocusCombo(QComboBox):
 
     def __init__(self, parent = None, itemList = None):
         super().__init__(parent)
+        if itemList is None:
+            focusModel = QSqlQueryModel()
+            super(FocusCombo, self).setModel(focusModel)
         if itemList is not None:
             self.setItemList(itemList)
-
 
     def setEditable(self, editable):
         super().setEditable(editable)
@@ -632,6 +592,28 @@ class FocusCombo(QComboBox):
             item = QStandardItem(itemList[row])
             itemModel.setItem(row, 1, item)
         super(FocusCombo, self).setModel(itemModel)
+
+    def seekMultipleData(self, dataDict):
+        """Function designto get a match on several columns of a QComboBox
+            **dataDict is a dictionary od the form {"column int": data}
+            The "column" mus be consisten with the combo Query"""
+        qry = self.model().query()
+        row = -1
+        while qry.next():
+            row +=1
+            for key in dataDict.keys():
+                check = True
+                if qry.value(key) != dataDict[key]:
+                    check = False
+                    break
+            if not check:
+                continue
+            else:
+                break
+        if check:
+            self.setCurrentIndex(row)
+
+
 
     def seekData(self, data, column=0):
         """Function design to position a combobox at the record searched - Usually with
@@ -672,7 +654,6 @@ class SQL_Query(QSqlQuery):
     def __init__(self, db):
         super().__init__(db)
 
-
     def seekData(self, data, column):
         try:
             self.seek(-1)
@@ -686,6 +667,24 @@ class SQL_Query(QSqlQuery):
         except Exception as err:
             print('seekData', type(err).__name__, err.args)
 
+class FocusSpin(QSpinBox):
+    focusLost = pyqtSignal(int)
+    focusGot = pyqtSignal(QSpinBox)
+
+    def __init__(self, parent = None):
+        super().__init__(parent)
+        self.parent = parent
+
+    def focusOutEvent(self, event):
+        if event.gotFocus():
+            self.focusGot.emit(self.value())
+
+        elif event.lostFocus():
+            try:
+                self.focusLost.emit(self.value())
+            except Exception as err:
+                print(err)
+        return
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
@@ -697,11 +696,102 @@ if __name__ == '__main__':
     app.exec_()
     sys.exit(app.exec_())
 
+class ProgressWidget(QWidget):
+    finished = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super(ProgressWidget, self).__init__(parent)
+        self.pd = QProgressDialog("Operation in Progress..", None, 0, 100, parent)
+        self.pd.setWindowModality(Qt.WindowModal)
+        self.pd.canceled.connect(self.cancel)
+        self.t = QTimer(self)
+        self.t.timeout.connect(self.perform)
+        self.pd.setValue(0)
+        self.t.start(10)
+
+    @property
+    def value(self):
+        return self.pd.value()
+
+    @pyqtSlot()
+    def perform(self):
+        step = self.pd.value() + 1
+        self.pd.setValue(step)
+        if step > self.pd.maximum():
+            self.cancel()
+
+    def wasFinished(self):
+        print("Progress Canceled")
+        return self.pd.wasCanceled()
 
 
+    @pyqtSlot()
+    def cancel(self):
+        self.t.stop()
+        self.finished.emit()
 
 
+class WorkerSignals(QObject):
+    finished = pyqtSignal()
+    error = pyqtSignal(tuple)
+    result = pyqtSignal(object)
+    progress = pyqtSignal(int)
 
+class Worker(QRunnable):
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+        self.kwargs['progress_callback'] = self.signals.progress
 
+    def run(self):
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+        except:
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            self.signals.error.emit((exctype, value, traceback.format_exc()))
+        else:
+            self.signals.result.emit(result)
+        finally:
+            self.signals.finished.emit()
 
+class Runnable(QRunnable):
+    cycles = 0
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self.fn = fn
+        self.fn.setValue(10)
+        self.fn.show()
+        self.data = args
+        self.t = QTimer()
+        self.t.timeout.connect(self.run)
+        self.t.start(1000)
 
+    def run(self):
+        while self.cycles <= self.fn.maximum():
+            QMetaObject.invokeMethod(self.fn, "setValue", Qt.QueuedConnection, Q_ARG(int, self.cycles))
+            self.cycles += 1
+            time.sleep(0.5)
+            if self.cycles > self.fn.maximum():
+                self.t.stop()
+
+TIME_LIMIT = 1000
+
+class WorkerThread(QThread):
+    #countChanged = pyqtSignal(int)
+
+    def __init__(self, obj):
+        super().__init__()
+        self.obj = obj
+        self.start()
+
+    def run(self):
+        count = 0
+        while count <= TIME_LIMIT:
+            count += 1
+            time.sleep(0.1)
+            QMetaObject.invokeMethod(self.obj, "setValue", Qt.QueuedConnection, Q_ARG(int, count))
+            #self.countChanged.emit(count)

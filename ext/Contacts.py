@@ -7,21 +7,22 @@ from PyQt5.QtCore import Qt, QSettings, pyqtSlot, QVariant, QEvent, QPoint, QMod
 from PyQt5.QtGui import QStandardItemModel, QColor, QMouseEvent
 from PyQt5.QtSql import QSqlQuery, QSqlQueryModel, QSqlDriver
 from ext.socketclient import RequestHandler
-from ext.Invoices import Invoice, Payables
+from ext.Invoices import Invoice, Payables, OtherCharge, Payment
 from ext import APM
-from ext.transfers import Transfer, EditTransfer
+from ext.transfers import Transfer
 #from ext.CQSqlDatabase import Cdatabase
 from ext.APM import QSqlAlignColorQueryModel, TableViewAndModel, FocusCombo, FocusPlainTextEdit, Cdatabase
-from configparser import ConfigParser
 
 
 class ChooseActiveSupplier(QDialog):
-    def __init__(self, db, parent=None):
+    def __init__(self, db, parent=None, qry=None):
         super().__init__(parent=parent)
         self.parent = parent
         self.db = db
         if not self.db.isOpen():
             self.db.open()
+        self.qrySupplier = qry
+        self.setModal(True)
         self.setUI()
 
 
@@ -33,8 +34,7 @@ class ChooseActiveSupplier(QDialog):
             2: ("Play", False, True, True, None),
             3: ("Break", False, True, True, None)}
         colorDict = {}
-        qry = self.getSuppliers()
-        self.table = TableViewAndModel(colDict, colorDict, (300, 200), qry)
+        self.table = TableViewAndModel(colDict, colorDict, (300, 200), self.qrySupplier)
         self.table.doubleClicked.connect(self.getSupplier)
 
         pushCancel = QPushButton('Cancel')
@@ -45,8 +45,13 @@ class ChooseActiveSupplier(QDialog):
         pushOpen.setMaximumWidth(60)
         pushOpen.clicked.connect(self.getSupplier)
 
+        pushShow = QPushButton("Show")
+        pushShow.setMaximumWidth(60)
+        pushShow.clicked.connect(self.showSupplier)
+
         hLayout = QHBoxLayout()
         hLayout.addWidget(pushCancel)
+        hLayout.addWidget(pushShow)
         hLayout.addWidget(pushOpen)
 
         vLayout = QVBoxLayout()
@@ -80,6 +85,23 @@ class ChooseActiveSupplier(QDialog):
             print("GetSuppliers", type(err).__name__, err.args)
 
     @pyqtSlot()
+    def showSupplier(self):
+        try:
+            model = self.table.model()
+            row = self.table.currentIndex().row()
+            model.query().seek(row)
+            record = model.query().record()
+            self.parent.supplierId = record.value(0)
+            self.parent.supplier = record.value(1)
+            self.parent.player = True if record.value(2) == u'\u2714' else False
+            self.parent.buster = True if record.value(3) == u'\u2714' else False
+            self.parent.setWindowTitle("Polo Managemet Contact Data from : " + record.value(1))
+            self.parent.supplierData()
+            self.close()
+        except Exception as err:
+            print("getSupplier", type(err).__name__, err.args)
+
+    @pyqtSlot()
     def getSupplier(self):
         try:
             model = self.table.model()
@@ -92,9 +114,6 @@ class ChooseActiveSupplier(QDialog):
             self.parent.buster = True if record.value(3) == u'\u2714' else False
             self.parent.setWindowTitle("Polo Managemet Contact Data from : " + record.value(1))
             self.close()
-            #res = Supplier(self.db,record.value(0))
-            #res.show()
-            #res.exec()
         except Exception as err:
             print("getSupplier", type(err).__name__, err.args)
 
@@ -124,8 +143,6 @@ class Supplier(QDialog):
         supplierMenu = self.getMenu()
         supplierMenu.show()
 
-
-        #self.setMinimumWidth(900)
         supplier = self.getSupplier()
         self.setWindowTitle(supplier)
         lblSupplier = QLabel(supplier)
@@ -210,12 +227,15 @@ class Supplier(QDialog):
                        5:("Agr No",False, True, True, None),
                        6:("Date", False, True, False, None),
                        7:("Break", False, True, True, None),
-                       8:("Play",False, True, True, None),
-                       9:("DOS", False, True, False, None),
-                       10:("Months", False, True, True, None),
-                       11:("Location", False, True, False, None)}
+                       8:("B&P",False, True, True, None),
+                       9: ("Play", False, True, True, None),
+                       10: ("Over", False, True, True, None),
+                       11:("DOS", False, True, False, None),
+                       12:("Months", False, True, True, None),
+                       13:("Location", False, True, False, None),
+                       14: ("Broke", False, True, True, None)}
             qry = self.getHorses()
-            tableHorses = TableViewAndModel(colDict, colorDict, (300, 100), qry)
+            self.tableHorses = TableViewAndModel(colDict, colorDict, (300, 100), qry)
 
         else:
             pushCancel.setText('Cancel')
@@ -258,10 +278,14 @@ class Supplier(QDialog):
         vLayout.addWidget(supplierMenu)
         vLayout.addLayout(gLayout)
         if self.type is None:
-            vLayout.addWidget(tableHorses)
+            vLayout.addWidget(self.tableHorses)
         vLayout.addLayout(buttonsLayout)
 
         self.setLayout(vLayout)
+
+    def refreshHorses(self):
+        self.tableHorses.model().setQuery(self.getHorses())
+
 
     def getHorses(self):
         try:
@@ -274,11 +298,14 @@ class Supplier(QDialog):
             c.coat,
             a.id agr,
             a.date,
-            IF (a.breaking = 1, _ucs2 x'2714', '') break,
-            IF (a.breaking = 0, _ucs2 x'2714', '') play,
+            IF (a.agreementtype = 1, _ucs2 x'2714', '') ,
+            IF (a.agreementtype = 1, _ucs2 x'2714', '') ,
+            IF (a.agreementtype = 1, _ucs2 x'2714', '') ,
+            IF (a.agreementtype = 1, _ucs2 x'2714', '') ,
             ah.dos, 
             TIMESTAMPDIFF(MONTH, CURDATE(), ah.dos) time,
-            l.name location
+            l.name location,
+            IF (h.isbroke = 1, _ucs2 x'2714', '') broke
             FROM horses h
             INNER JOIN coats c 
             ON h.coatid = c.id
@@ -395,20 +422,32 @@ class Supplier(QDialog):
         addInvoiceAllPaymentAction.triggered.connect(lambda: self.addInvoice(APM.PAYABLES_TYPE_ALL))
 
         addBoardAction = QAction("Board Charges", self)
-        addBoardAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_BOARD))
+        addBoardAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_BOARD,APM.OPEN_NEW))
+
+        editBoardAction = QAction("Edit Board Charge", self)
+        editBoardAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_BOARD, APM.OPEN_EDIT))
 
         addDownpaymentAction = QAction("Dawnpayment Charges", self)
-        addDownpaymentAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_DOWNPAYMENT))
+        addDownpaymentAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_DOWNPAYMENT, APM.OPEN_NEW))
+
+        editDownpaymentAction = QAction("Edit Downpayment",self )
+        editDownpaymentAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_DOWNPAYMENT, APM.OPEN_EDIT))
 
         addOtherChargeAction = QAction("Other Charges", self)
-        addOtherChargeAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_OTHER))
+        addOtherChargeAction.triggered.connect(lambda : self.addOtherCharges(APM.OPEN_NEW))
+
+        editOtherChargeAction = QAction("Edit Other Charges", self)
+        editOtherChargeAction.triggered.connect(lambda: self.addOtherCharges(APM.OPEN_EDIT))
 
 
 
         editInvoiceAction = QAction("Edit Invoices", self)
 
         addPaymentAction = QAction("New Payment", self)
+        addPaymentAction.triggered.connect(lambda: self.addPayment(APM.OPEN_NEW))
+
         editPaymentAction = QAction("Edit Payment", self)
+        editPaymentAction.triggered.connect(lambda: self.addPayment(APM.OPEN_EDIT))
 
         addLocationAction = QAction("New Location", self)
         addLocationAction.setObjectName("locations")
@@ -430,10 +469,16 @@ class Supplier(QDialog):
         transferMenu.addAction(addTransferAction)
         transferMenu.addAction(editTransferAction)
 
+
         billingMenu = supplierMenu.addMenu('Billing')
         billingMenu.addAction(addBoardAction)
         billingMenu.addAction(addDownpaymentAction)
         billingMenu.addAction(addOtherChargeAction)
+        billingMenu.addSeparator()
+        editBillingMenu = billingMenu.addMenu('Edit')
+        editBillingMenu.addAction(editBoardAction)
+        editBillingMenu.addAction(editDownpaymentAction)
+        editBillingMenu.addAction(editOtherChargeAction)
 
         invoicesMenu = supplierMenu.addMenu("Invoices")
         invoicesMenu.addAction(addInvoiceAllPaymentAction)
@@ -724,16 +769,17 @@ class Supplier(QDialog):
 
     @pyqtSlot()
     def addTransfer(self):
-        res = Transfer(self.db, self.supplierId, con_string= self.parent.con_string, parent=self.parent)
+        res = Transfer(self.db, self.supplierId, con_string= self.parent.con_string, parent=self)
         res.show()
         res.exec()
 
     @pyqtSlot()
     def editTransfer(self):
-        res = EditTransfer(self.db, self.supplierId, self.parent)
+        res = Transfer(self.db, self.supplierId, mode=APM.OPEN_EDIT, parent=self.parent)
         res.show()
         res.exec()
 
+    @pyqtSlot()
     def addInvoice(self, payableType):
         try:
             res = Invoice(self.db, self.supplierId, payableType,mode=APM.OPEN_NEW,
@@ -743,16 +789,38 @@ class Supplier(QDialog):
         except APM.DataError as err:
             print(err.source, err.message)
 
-    def addPayables(self, payableType):
+    @pyqtSlot()
+    def addPayment(self, mode):
         try:
-            res = Payables(self.db, self.supplierId, payableType, mode=APM.OPEN_NEW,
-                           con_string=self.parent.con_string, parent=self.parent)
+            res = Payment(self.db, self.supplierId, mode,parent=self.parent)
+            res.show()
+
+        except APM.DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print(type(err), err.args)
+
+    @pyqtSlot()
+    def addPayables(self, payableType,openMode):
+        try:
+            res = Payables(self.db, self.supplierId, payableType, mode=openMode, parent=self.parent)
             res.show()
             res.exec()
         except APM.DataError as err:
             print(err.source, err.message)
         except Exception as err:
-            print('Payables',type(err).__name__, err.args)
+            print('addPayables',type(err).__name__, err.args)
+
+    def addOtherCharges(self, mode):
+        try:
+            res = OtherCharge(self.db,self.supplierId, mode, self.parent.con_string,parent=self.parent)
+            res.show()
+            res.exec()
+
+        except APM.DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print('addOtherCharges',type(err).__name__, err.args)
 
 class Contacts(QDialog):
 
@@ -1246,15 +1314,18 @@ class ShowContacts(QDialog):
 
 class Location(QDialog):
 
-    def __init__(self, db, supplierId, locationId=None, mode = APM.OPEN_NEW):
+    def __init__(self, db, supplierId, locationId=None, name=None, mode = APM.OPEN_NEW):
         super().__init__()
         self.db = db
         self.supplierId = supplierId
         self.supplier = self.getSupplier()
         self.setModal(True)
         self.locationId = locationId
+        self.name = name
         self.mode = mode
         self.setUI()
+
+
 
     def setUI(self):
         self.setWindowTitle(self.supplier)
@@ -1351,6 +1422,9 @@ class Location(QDialog):
             vLayout.addWidget(self.tableLocations)
         vLayout.addLayout(pushLayout)
         self.setLayout(vLayout)
+
+        if self.name:
+            self.lineLocation.setText(self.name)
 
     def getLocations(self):
         try:

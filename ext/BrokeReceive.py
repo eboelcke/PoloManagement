@@ -2,18 +2,19 @@ from ext.MySQLConnector import MySQLConnector
 from PyQt5.QtWidgets import (QDialog, QLabel, QLineEdit, QDateEdit, QGridLayout, QHBoxLayout,
                              QTableView, QVBoxLayout, QPushButton, QTextEdit, QHeaderView,
                              QMessageBox)
-from PyQt5.QtGui import QStandardItemModel, QStandardItem
-from PyQt5.QtCore import QSettings, QVariant, QDate, Qt
-#from ext.CQSqlDatabase import Cdatabase
-from ext.APM import (FocusCombo, QSqlAlignColorQueryModel,NullDateEdit, DataError,
-                     PAYABLES_TYPE_FULL_BREAK, PAYABLES_TYPE_HALF_BREAK,
-                     BRAKE_TYPE_FINAL, BRAKE_TYPE_HALFBREAKE, BRAKE_TYPE_INCOMPLETE)
+from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon
+from PyQt5.QtCore import QSettings, QVariant, QDate, Qt, pyqtSlot
+#from ext.CQSqlDatabase import Cdatabase,
+from ext.APM import (FocusCombo, NullDateEdit, DataError, OPEN_NEW, OPEN_EDIT,
+                     PAYABLES_TYPE_FULL_BREAK, PAYABLES_TYPE_HALF_BREAK, TableViewAndModel,
+                     BRAKE_TYPE_FINAL, BRAKE_TYPE_HALFBREAKE, BRAKE_TYPE_INCOMPLETE,
+                     CLEARENCE_REASON_BREAK)
 from PyQt5.QtSql import QSqlQuery
 import pymysql
 
 class ReceiveBroken(QDialog):
 
-    def __init__(self, db, con_string, agreementId=None, parent=None):
+    def __init__( self, mode, db, con_string, agreementId=None, qryLoad = None, parent=None):
         super().__init__()
         self.horseId = None
         self.halfBreak = None
@@ -21,12 +22,16 @@ class ReceiveBroken(QDialog):
         self.agreementId = agreementId
         self.con_string = con_string
         self.db = db
+        self.qryLoad = qryLoad
         if not self.db.isOpen():
             self.db.open()
         self.parent = parent
         self.supplierId = parent.supplierId
+        self.breakingId = None
+        self.mode = mode
         if not self.db.isOpen():
             self.db.open()
+        self.setModal(True)
         self.setUI()
 
     def setUI(self):
@@ -68,7 +73,7 @@ class ReceiveBroken(QDialog):
         self.dateDor = NullDateEdit(self)
         self.dateDor.setToolTip("Receiving Date")
         self.dateDor.setMinimumDate(self.getLastBoardDate())
-        self.dateDor.setDate(self.dateDor.date)
+        self.dateDor.setDate(QDate.currentDate())
         self.dateDor.dateChanged.connect(self.enableSave)
 
         keys = ('0', '1', '2')
@@ -114,162 +119,121 @@ class ReceiveBroken(QDialog):
         self.notes = QTextEdit()
         self.notes.setToolTip("Breaking Notes")
         self.notes. setMaximumHeight(50)
+        self.notes.textChanged.connect(self.enableSave)
 
         self.pushSave = QPushButton('Save')
         self.pushSave.clicked.connect(self.saveAndClose)
+        self.pushSave.setMaximumWidth(80)
         self.pushSave.setEnabled(False)
 
-        self.pushCancel = QPushButton('Cancel')
-        self.pushCancel.clicked.connect(self.close)
+        self.pushCancel = QPushButton('Close')
+        self.pushCancel.setMaximumWidth(80)
+        self.pushCancel.clicked.connect(self.closeWidget)
+        colorDict = {}
+        if self.mode == OPEN_NEW:
 
-        self.table = QTableView()
+            colDict = {0 :("Provider", True, True, False, None ),
+                       1 :("AgrID", False, True, True, None),
+                       2 : ("Horse", False, False, False, None),
+                       3 : ("Buster", True, True, False, None),
+                       4 : ("DOS", False, True, True, None),
+                       5 : ("Days", False, True, True, None),
+                       6 : ("AHID", True, True, False, None),
+                       7 :("HID", True, True, True, None),
+                       8 : ("Half Break", True, True, False, None)}
+        else:
+            self.pushReset = QPushButton()
+            self.pushReset.setIcon(QIcon(":Icons8/Edit/reset.png"))
+            self.pushReset.setMaximumWidth(50)
+            self.pushReset.setEnabled(False)
+            self.pushReset.clicked.connect(self.resetWidget)
+
+            colDict = {0 :("Provider", True, True, False, None ),
+                       1 :("AgrID", False, True, True, None),
+                       2 : ("Horse", False, False, False, None),
+                       3 : ("Buster", True, True, False, None),
+                       4 : ("DOS", False, True, True, None),
+                       5 : ("Days", False, True, True, None),
+                       6 : ("AHID", True, True, False, None),
+                       7 : ("HID", True, True, True, None),
+                       8 : ("Half Break", True, True, False, None),
+                        9: ("BKID", True, True, False, None),
+                       10: ("DOR", False, True, False, None),
+                       11: ("TYPE", False, True, True, None),
+                       12: ("RATE", False, True, True, None),
+                       13: ("NOTES", True, True, False, None)}
+
+        self.table = TableViewAndModel(colDict, colorDict, (100,100), self.qryLoad)
         self.table.doubleClicked.connect(self.getHorseData)
 
-        centerColumns = [1, 5]
-        colorDict = {}
-        rightColumns = []
-        model = QSqlAlignColorQueryModel(centerColumns, rightColumns, colorDict)
-        try:
-            model.setQuery(self.loadHorses())
-            model.setHeaderData(0,Qt.Horizontal, 'Provider')
-            model.setHeaderData(1, Qt.Horizontal,'ID')
-            model.setHeaderData(2, Qt.Horizontal, 'Horse')
-            model.setHeaderData(4, Qt.Horizontal, 'Start')
-            model.setHeaderData(5, Qt.Horizontal, 'Days')
+        self.pushDelete = QPushButton("Delete")
+        self.pushDelete.setMaximumWidth(70)
+        self.pushDelete.setEnabled(False)
+        self.pushDelete.clicked.connect(self.deleteReception)
 
-            self.table.setModel(model)
-            self.table.verticalHeader().setVisible(False)
-            self.table.hideColumn(3)
-            self.table.hideColumn(6)
-            self.table.hideColumn(7)
-            self.table.hideColumn(8)
+        lblDetail = QLabel("Horses List")
+        layout = QGridLayout()
+        layout.addWidget(lblProvider, 0, 0)
+        layout.addWidget(self.lineProvider,0 ,1)
+        layout.addWidget(lblAgreeId, 0,2)
+        layout.addWidget(self.lineAgreement,0,3)
+        layout.addWidget(lblHorse,1,0)
+        layout.addWidget(self.lineHorse,1,1)
+        layout.addWidget(lblBreaker, 1,2)
+        layout.addWidget(self.lineBreaker, 1, 3)
+        layout.addWidget(lblDos, 2, 0)
+        layout.addWidget(self.dateDos,2,1)
+        layout.addWidget(lblDays,2,2)
+        layout.addWidget(self.lineDays)
+        layout.addWidget(lblDor,3,0)
+        layout.addWidget(self.dateDor,3,1)
+        layout.addWidget(self.notes,3,2, 1,2)
+        layout.addWidget(lblBreakType, 4, 0)
+        layout.addWidget(self.comboType,4,1)
+        layout.addWidget(lblBreakRate,4,2)
+        layout.addWidget(self.comboRate)
 
-            header = self.table.horizontalHeader()
-            header.setSectionResizeMode(0, QHeaderView.Stretch)
-            header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        hLayout = QHBoxLayout()
+        hLayout.addSpacing(100)
+        if self.mode != OPEN_NEW:
+            hLayout.addWidget(self.pushReset)
+            hLayout.addWidget(self.pushDelete)
+            self.setWindowTitle("Editing " + self.windowTitle())
+        hLayout.addWidget(self.pushCancel)
+        hLayout.addSpacing(100)
+        hLayout.addWidget(self.pushSave)
 
-            self.table.verticalHeader().setDefaultSectionSize(25)
-            self.table.horizontalHeader().setStyleSheet("QHeaderView { font-size: 8pt;}")
-            self.table.setStyleSheet("QTableView {font-size: 8pt;}")
-
-            lblDetail = QLabel("Horses List")
-            layout = QGridLayout()
-            layout.addWidget(lblProvider, 0, 0)
-            layout.addWidget(self.lineProvider,0 ,1)
-            layout.addWidget(lblAgreeId, 0,2)
-            layout.addWidget(self.lineAgreement,0,3)
-            layout.addWidget(lblHorse,1,0)
-            layout.addWidget(self.lineHorse,1,1)
-            layout.addWidget(lblBreaker, 1,2)
-            layout.addWidget(self.lineBreaker, 1, 3)
-            layout.addWidget(lblDos, 2, 0)
-            layout.addWidget(self.dateDos,2,1)
-            layout.addWidget(lblDays,2,2)
-            layout.addWidget(self.lineDays)
-            layout.addWidget(lblDor,3,0)
-            layout.addWidget(self.dateDor,3,1)
-            layout.addWidget(self.notes,3,2, 1,2)
-            layout.addWidget(lblBreakType, 4, 0)
-            layout.addWidget(self.comboType,4,1)
-            layout.addWidget(lblBreakRate,4,2)
-            layout.addWidget(self.comboRate)
-
-            hLayout = QHBoxLayout()
-            hLayout.addSpacing(100)
-            hLayout.addWidget(self.pushCancel)
-            hLayout.addSpacing(100)
-            hLayout.addWidget(self.pushSave)
-
-            vLayout = QVBoxLayout()
-            vLayout.addLayout(layout)
-            vLayout.addWidget(lblDetail)
-            vLayout.addWidget(self.table)
-            vLayout.addLayout(hLayout)
-            self.setLayout(vLayout)
-        except DataError as err:
-            QMessageBox.warning(self, "There is no available data", err.message)
-            raise DataError(err.source, err.message)
-            return
+        vLayout = QVBoxLayout()
+        vLayout.addLayout(layout)
+        vLayout.addWidget(lblDetail)
+        vLayout.addWidget(self.table)
+        vLayout.addLayout(hLayout)
+        self.setLayout(vLayout)
 
     def getLastBoardDate(self):
+        """Set the minimum date as the last boarding date if available,
+        otherwise as the agreement signing date."""
         try:
             qry = QSqlQuery(self.db)
-            qry.prepare("""SELECT MAX(b.boardingdate) FROM 
-            agreements a
-            INNER JOIN agreementhorses ah 
-            ON a.id = ah.agreementid
-            INNER JOIN boarding  b 
-            ON a.supplierid = b.supplierid 
-            WHERE a.id= ?""")
-            qry.addBindValue(QVariant(self.agreementId))
-            qry.exec()
+            qry.exec("CALL system_minimumdate({})".format(self.agreementId))
             if qry.lastError().type() != 0:
                 raise DataError("getLastBoardDate", qry.lastError().text())
-            qry.first()
-            if not qry.value(0).isNull():
+            if qry.first():
                 return qry.value(0)
-            return qry.value(1)
+
         except DataError as err:
             print(err.source, err.message)
-
-    def loadHorses(self):
-
-        try:
-            qry = QSqlQuery(self.db)
-            sql_qry = """
-                         SELECT 
-                         c.fullname AS Provider, 
-                          a.id AS 'Agreement ID',
-                          h.name as Horse, 
-                          cb.fullname AS breaker,
-                          ah.dos AS 'Starting Date',
-                          TIMESTAMPDIFF(DAY, ah.dos, CURRENT_DATE()) AS Days,
-                          ah.id AS 'agreementhorseid',
-                          h.id as horseid,
-                          a.halfbreakpercent as half
-                          FROM agreements as a
-                          INNER JOIN agreementhorses as ah
-                          ON a.id = ah.agreementid
-                          INNER JOIN  horses as h
-                          ON ah.horseid = h.id
-                          INNER JOIN contacts as c
-                          ON a.supplierid = c.id
-                          LEFT JOIN contacts as cb
-                          ON ah.breakerid = cb.id
-                          WHERE h.isbroke = False
-                          AND ah.dos IS NOT null
-                          AND ah.billable = TRUE  
-                          """
-            if self.agreementId:
-                sql_qry += "AND a.id = ?"
-            qry.prepare(sql_qry)
-            if self.agreementId:
-                qry.addBindValue(QVariant(self.agreementId))
-            qry.exec()
-            if qry.size() == 0:
-                raise DataError("loadHorses","No Data Available")
-            elif qry.size() == -1:
-                raise DataError("loadHorses", qry.lastError().text())
-            return qry
-        except DataError as err:
-            print(err.source, err.message)
-            raise DataError(err.source, err.message)
-            #self.parent.messageBox(self,err.source, err.message)
-        except Exception as err:
-            print('loadHorses', type(err).__name__, err.args)
 
     def getHorseData(self):
         row = self.table.currentIndex().row()
         self.table.model().query().seek(row)
         record = self.table.model().query().record()
+        msg = "Receive {} from breaking with {} ?".format(
+                                       record.value(2), record.value(0)) if self.mode == OPEN_NEW else \
+            "Edit/Delete {} from breaking with {} ?".format(
+                    record.value(2), record.value(0))
         try:
-            res = QMessageBox.question(self,
-                                       "Receiving Horse",
-                                       "Receive {} from breaking with {}".format(
-                                       record.value(2), record.value(0)))
+            res = QMessageBox.question(self,"Receiving Horse",msg, QMessageBox.Yes|QMessageBox.No)
             if res != QMessageBox.Yes:
                 self.clearForm()
             else:
@@ -282,9 +246,20 @@ class ReceiveBroken(QDialog):
                 self.agreementHorseId = record.value(6)
                 self.horseId = record.value(7)
                 self.halfBreak = record.value(8)
+                if self.mode == OPEN_EDIT:
+                    self.dateDor.setDate(record.value(10))
+                    self.breakingId = record.value(9)
+                    self.comboType.setCurrentIndex(record.value(11))
+                    self.comboRate.setCurrentIndex(record.value(12))
+                    self.notes.setText(record.value(13))
+                    self.pushReset.setEnabled(True)
+                self.pushSave.setEnabled(False)
+                self.pushDelete.setEnabled(True)
 
+        except ValueError:
+            return
         except Exception as err:
-            print(type(err).__name__, err.args)
+            print('getHorseData', type(err).__name__, err.args)
 
     def clearForm(self):
         self.lineHorse.clear()
@@ -304,6 +279,9 @@ class ReceiveBroken(QDialog):
 
     def enableSave(self):
         if self.window().isVisible():
+            if self.mode == OPEN_EDIT:
+                self.pushSave.setEnabled(True)
+                return
             if self.dateDor.text != 'None' \
                     and len(self.comboType.currentText()) > 0 \
                     and len(self.comboRate.currentText()) > 0 \
@@ -314,98 +292,101 @@ class ReceiveBroken(QDialog):
 
     def saveAndClose(self):
         """"Requieres to save on breaking table  and payables table .and to update broke in horses and active in agreementhorses?
-        Remember to transfer the hores to the ownere´s main location or establish a new contract with the horses
+        Remember to transfer the horses to the ownere´s main location or establish a new contract with the horses
          currently located"""
         try:
-            qryAmount = QSqlQuery(self.db)
-            cnn = pymysql.connect(**self.con_string)
-            cnn.begin()
-            with cnn.cursor() as cur:
-                sql_breaking = """ INSERT INTO breaking
-                (agreementhorseid, dor, type, rate, notes)
-                VALUES (%s, %s, %s, %s, %s)"""
-                parameters = (self.agreementHorseId,
-                              self.dateDor.date.toString('yyyy-MM-dd'),
-                              self.comboType.getHiddenData(0),
-                              self.comboRate.getHiddenData(0),
-                              self.notes.toPlainText())
-                cur.execute(sql_breaking, parameters)
-                breakingid = cur.lastrowid
-                if parameters[2] == BRAKE_TYPE_FINAL:
-                    sql_horses = """ UPDATE horses 
-                    SET isbroke = 1, 
-                    isbreakable = 0
-                    WHERE id = %s"""
-                    cur.execute(sql_horses, (self.horseId,))
-                    qryAmount.prepare("""
-                                SELECT 
-                                a.totalamount - COALESCE(SUM(p.amount),0)
-                                FROM agreements a 
-                                INNER JOIN  agreementhorses ah
-                                ON a.id = ah.agreementid
-                                LEFT JOIN payables p
-                                ON ah.id = p.agreementhorseid
-                                WHERE (p.typeid = 0 OR p.typeid = 1 OR p.typeid IS NULL) 
-                                AND ah.id = ? """)
-                    qryAmount.addBindValue(self.agreementHorseId)
-                    qryAmount.exec()
-                    if qryAmount.lastError().type() != 0:
-                        raise DataError("saveAndClose", qryAmount.lastError().text())
-                    if qryAmount.first():
-                        if qryAmount.value(0) > 0:
-                            sql_payable = """INSERT INTO payables 
-                                (agreementhorseid, ticketid, concept, amount, typeid) 
-                                VALUES (%s, %s, %s, %s, %s)"""
-                            parampay = (self.agreementHorseId, breakingid, "Final payment for the break of {}".format(self.lineHorse.text()),
-                            qryAmount.value(0),PAYABLES_TYPE_FULL_BREAK)
-                            cur.execute(sql_payable, parampay)
-                if parameters[2] == BRAKE_TYPE_HALFBREAKE and self.halfBreak:
-                    qryAmount.prepare("""
-                                SELECT 
-                                COALESCE(a.halfbreakpercent * a.totalamount * 0.01 - SUM(p.amount), 0 ) 
-                                FROM agreements a
-                                INNER JOIN agreementhorses ah
-                                ON a.id = ah.agreementid
-                                LEFT JOIN  payables P
-                                ON  ah.id = p.agreementhorseid  
-                                WHERE (p.typeid = 0 OR p.typeid = 1 OR p.typeid = 2 OR p.typeid = 3)
-                                AND ah.id = ? 
-                                GROUP BY ah.id""")
-                    qryAmount.addBindValue(self.agreementHorseId)
-                    qryAmount.exec()
-                    if qryAmount.lastError().type() != 0:
-                        raise DataError("saveAndClose", qryAmount.lastError().text())
-                    if qryAmount.first():
-                        if qryAmount.value(0) > 0:
-                            sql_payable = """INSERT INTO payables 
-                                (agreementhorseid, ticketid, concept, amount, typeid) 
-                                VALUES (%s, %s, %s, %s, %s)"""
-                            parampay = (self.agreementHorseId, breakingid,
-                                        "Final payment for the half-break of {}".format(self.lineHorse.text()),
-                            qryAmount.value(0),PAYABLES_TYPE_HALF_BREAK)
-                            cur.execute(sql_payable, parampay)
-                sql_agreementhorses = """ UPDATE agreementhorses
-                    SET billable = False 
-                    WHERE id = %s"""
-                cur.execute(sql_agreementhorses, self.agreementHorseId)
-            cnn.commit()
-            self.table.model().setQuery(self.loadHorses())
-            self.clearForm()
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL receivebroken_save({}, '{}',{},{}, '{}', {}, {}, {}, {})".format(
+                self.agreementHorseId,
+                self.dateDor.date.toString("yyyy-MM-dd"),
+                self.comboType.getHiddenData(0),
+                self.comboRate.getHiddenData(0),
+                self.notes.toPlainText(),
+                self.horseId,
+                self.halfBreak,
+                self.mode,
+                self.breakingId if self.breakingId else 'NULL'))
+            if qry.lastError().type() != 0:
+                raise DataError("saveAndClose", qry.lastError().text())
+            if qry.first():
+                print(qry.value(0), qry.value(1))
+            self.resetWidget()
+
         except DataError as err:
             print(err.source, err.message)
-            #raise DataError(err.source, err.message)
+            # raise DataError(err.source, err.message)
             self.parent.messageBox(err.source, err.message)
-            cnn.rollback()
-        except pymysql.Error as err:
-            print("saveAndClose",err.args)
-            cnn.rollback()
+            raise DataError(err)
         except Exception as err:
             print('saveAndClose',type(err).__name__, err.args)
-        finally:
-            cnn.close()
 
 
     def conTest(self):
         if self.cnx.open:
             print("y")
 
+    @pyqtSlot()
+    def resetWidget(self):
+        self.lineHorse.clear()
+        self.lineDays.clear()
+        self.lineBreaker.clear()
+        self.lineAgreement.clear()
+        self.lineProvider.clear()
+        self.comboRate.setCurrentIndex(-1)
+        self.comboType.setCurrentIndex(-1)
+        self.dateDos.setDate(QDate(99, 99, 99))
+        self.dateDor.setDate(QDate(99, 99, 99))
+        self.notes.clear()
+        self.agreementHorseId = None
+        self.horseId = None
+        self.resetTables()
+
+    @pyqtSlot()
+    def deleteReception(self):
+        ans = QMessageBox.question(self, 'Delete Reception', "This record once deleted can't be recoverd."
+                                                             " Would you continue?",QMessageBox.Yes | QMessageBox.No)
+        if ans != QMessageBox.Yes:
+            return
+        try:
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL receivebroken_delete({}, {}, {}, {})".format(self.agreementHorseId,
+                                                           self.comboType.getHiddenData(0),
+                                                          self.horseId,
+                                                          self.breakingId))
+            if qry.lastError().type() != 0:
+                raise DataError('deleteReception', qry.lastError().text())
+            if qry.first():
+                print(qry.value(0), qry.value(1))
+            self.resetWidget()
+            self.parent.setTableBreaking()
+        except DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print('deleteReception', err.args)
+
+
+    def resetTables(self):
+        try:
+            qryLoad = QSqlQuery(self.db)
+            qryLoad.exec("CALL receivebroken_loadhorses({}, '{}', {})".format(self.agreementId,
+                                                                              self.dateDor.date.toString("yyyy-MM-dd"),
+                                                                              self.mode))
+            if qryLoad.lastError().type() != 0:
+                raise DataError("setUI - load horse", qryLoad.lastError().text())
+            if qryLoad.size() < 1 :
+                QMessageBox.warning(self, "No data", "There are not more horses to be considered!",QMessageBox.Ok)
+                self.closeWidget()
+            self.table.model().setQuery(qryLoad)
+            qry = self.parent.queryBreaking()
+            self.parent.dockBreaking.widget().model().setQuery(qry)
+
+        except DataError as err:
+            print(err.source, err.message)
+
+        except AttributeError as err:
+            print("retetTables", err.args)
+
+    @pyqtSlot()
+    def closeWidget(self):
+        super().close()
+        #self.done(QDialog.Rejected)

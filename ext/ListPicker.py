@@ -162,13 +162,12 @@ class PickerWidget(QGroupBox):
                 ON h.sexid = s.id
                 WHERE
                 h.isbroke != ?
-                AND h.active
-                AND h.id NOT IN (SELECT horseid FROM agreementhorses WHERE active = 1)
-                AND h.locationid
-                AND EXISTS (SELECT id FROM locations WHERE id = h.locationid AND (contactid = 0 OR contactid = ?))   
+                AND h.active 
+                AND h.id NOT IN (SELECT horseid FROM agreementhorses WHERE active AND billable)
                 ORDER BY h.sexid, h.name""")
+            #AND EXISTS (SELECT id FROM locations WHERE id = h.locationid AND (contactid = 0 OR contactid = ?))
             qryLoad.addBindValue(QVariant(self.isBreaking))
-            qryLoad.addBindValue(QVariant(self.parent.comboSupplier.getHiddenData(0)))
+            #qryLoad.addBindValue(QVariant(self.parent.comboSupplier.getHiddenData(0)))
             qryLoad.exec()
             if qryLoad.lastError().type() != 0:
                 raise DataError("createTable", qryLoad.lastError().text())
@@ -176,13 +175,15 @@ class PickerWidget(QGroupBox):
                 qryBase = QSqlQuery(self.tempDb)
                 qryBase.exec("""
                     SELECT id, rp, horse, sex, coat, age, locationid
-                        FROM stock""")
+                        FROM stock
+                        ORDER BY sex, horse""")
                 if qryBase.lastError().type() != 0:
                    raise DataError("createTable", qryBase.lastError().Text())
                 qryChoose = QSqlQuery(self.tempDb)
                 qryChoose.exec("""
                     SELECT id, rp, horse, sex, coat, age, locationid
-                    FROM choose""")
+                    FROM choose
+                    ORDER BY sex, horse""")
                 if qryChoose.lastError().type() != 0:
                     raise DataError("createTable", qryChoose.lastError().Text())
                 return (qryBase, qryChoose)
@@ -261,13 +262,14 @@ class PickerWidget(QGroupBox):
                             SELECT id, rp, horse, sex, coat, age, locationid
                             FROM  stock 
                             WHERE id NOT IN (SELECT id FROM choose) 
-                            ;""")
+                            ORDER BY sex, age DESC;""")
         self.horseView.model().setQuery(qryStock)
 
         qryChoose = QSqlQuery(self.tempDb)
         qryChoose.exec_("""
                             SELECT id, rp, horse, sex, coat, age, locationid
-                            FROM choose ;""")
+                            FROM choose 
+                            ORDER BY sex, age DESC;""")
         self.selectView.model().setQuery(qryChoose)
 
     @property
