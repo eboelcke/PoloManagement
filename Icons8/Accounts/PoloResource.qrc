@@ -1,0 +1,108 @@
+<RCC>
+  <qresource prefix="Icons8/Accounts">
+    <file>bill.png</file>
+    <file>dollar.png</file>
+    <file>invoice.png</file>
+    <file>ledger.png</file>
+    <file>cash.png</file>
+  </qresource>
+  <qresource prefix="Icons8/exit">
+    <file>closeman.png</file>
+    <file>closesign.png</file>
+    <file>closex.png</file>
+  </qresource>
+  <qresource prefix="Icons8/print">
+    <file>filter.png</file>
+    <file>print.png</file>
+    <file>printtopdf.png</file>
+    <file>sendtoprinter.png</file>
+  </qresource>
+  <qresource prefix="Icons8/Databases">
+    <file>cloud.png</file>
+    <file>database.png</file>
+    <file>msaccess.png</file>
+  </qresource>
+  <qresource prefix="Icons8/Bills">
+    <file>bills.png</file>
+    <file>boarding.png</file>
+    <file>charges.png</file>
+    <file>downpayment.png</file>
+  </qresource>
+  <qresource prefix="Icons8/Agreement">
+    <file>document.png</file>
+    <file>Agreement.png</file>
+  </qresource>
+  <qresource prefix="Icons8/arrows">
+    <file>import.png</file>
+    <file>double-left.png</file>
+    <file>double-right.png</file>
+    <file>left-arrow.png</file>
+    <file>right-arrow.png</file>
+  </qresource>
+  <qresource prefix="Icons8/Suppliers">
+    <file>SupplierData.png</file>
+    <file>veterinarian.png</file>
+    <file>polo.png</file>
+    <file>coach (2).png</file>
+    <file>coach.png</file>
+    <file>location.png</file>
+    <file>supplier.png</file>
+    <file>Contact.png</file>
+  </qresource>
+  <qresource prefix="Config">
+    <file>config.ini</file>
+  </qresource>
+  <qresource prefix="Icons8/Transport">
+    <file>pickup.png</file>
+  </qresource>
+  <qresource prefix="Icons8/Edit">
+    <file>eraser.png</file>
+    <file>EditContact.png</file>
+    <file>EditHorse.png</file>
+    <file>Edit.png</file>
+    <file>EditAgreement.png</file>
+    <file>search.png</file>
+    <file>reset.png</file>
+  </qresource>
+  <qresource prefix="Icons8/People">
+    <file>person.png</file>
+    <file>manager.png</file>
+    <file>addcontact.png</file>
+    <file>editcontact.png</file>
+    <file>Dealer.png</file>
+    <file>farmer.png</file>
+    <file>Representative.png</file>
+    <file>HorseBreaker.png</file>
+    <file>PlayerSeller.png</file>
+    <file>Seller.png</file>
+  </qresource>
+  <qresource prefix="Icons8/File">
+    <file>openfile.png</file>
+    <file>addfile.png</file>
+    <file>closefile.png</file>
+    <file>deletefile.png</file>
+    <file>newfile.png</file>
+    <file>save.png</file>
+    <file>saveas.png</file>
+    <file>saveclose.png</file>
+    <file>trash.png</file>
+  </qresource>
+  <qresource prefix="Icons8/Sales">
+    <file>sales.png</file>
+  </qresource>
+  <qresource prefix="Icons8/Horses">
+    <file>BrokeHorse.png</file>
+    <file>newhorse.png</file>
+    <file>breaking.png</file>
+    <file>dead.png</file>
+    <file>icons8-equestrian-50.png</file>
+    <file>icons8-modern-pentathlon-50.png</file>
+    <file>icons8-trash-50.png</file>
+    <file>reject.png</file>
+  </qresource>
+  <qresource prefix="Icons8">
+    <file>man.png</file>
+    <file>transport.png</file>
+    <file>Stable.png</file>
+  </qresource>
+</RCC>
