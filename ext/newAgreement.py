@@ -11,7 +11,7 @@ from ext.socketclient import  RequestHandler
 from ext.ListPicker import PickerWidget
 from ext.Contacts import Contacts
 from ext import APM
-from ext.APM import FocusSpin
+from ext.APM import FocusSpin, FocusCombo
 from ext.Settings import SettingsDialog
 
 
@@ -51,11 +51,6 @@ class Agreement(QDialog):
         self.setWindowTitle("New Play & Sale Agreement")
         self.setUi()
 
-
-
-        #self.toggleBreaking()
-        #self.radioAtEnd.setChecked(True)
-
     def setUi(self):
         lblAgreement = QLabel("Agreement Title")
         lblDate = QLabel("Date")
@@ -93,10 +88,24 @@ class Agreement(QDialog):
         self.spinInstallments.setMaximumWidth(50)
         self.spinInstallments.setEnabled(False)
 
+        self.checkUpdatable = QCheckBox("Updatable")
+        self.checkUpdatable.setChecked(False)
+        self.checkUpdatable.hide()
+        self.checkUpdatable.stateChanged.connect(self.enableIndex)
+
         self.lineDownpayment = QLineEdit('0.00')
         self.lineDownpayment.setValidator(valAmount)
         self.lineDownpayment.setMaximumWidth(100)
         self.lineDownpayment.setAlignment(Qt.AlignRight)
+
+        self.lblBaseIndex = QLabel("Base Index")
+        self.lblBaseIndex.hide()
+        self.lineBaseIndex = QLineEdit()
+        self.lineBaseIndex.hide()
+        self.lineBaseIndex.setValidator(valAmount)
+        self.lineBaseIndex.setEnabled(False)
+        self.lineBaseIndex.setMaximumWidth(100)
+        self.lineBaseIndex.setAlignment(Qt.AlignRight)
 
         self.spinMinimum = QSpinBox()
         self.spinMinimum.setValue(0)
@@ -158,6 +167,26 @@ class Agreement(QDialog):
         self.paymentOptions.setId(self.radioFee, 1)
         self.paymentOptions.setId(self.radioOnSite, 2)
         self.paymentOptions.buttonClicked.connect(self.checkOption)
+        """Contract types:
+                    -Breaking: - Takes horse for breaking.
+                     Break & Play: - Takes horse for breaking and further play and sale. Only on commision on sale-
+                     Play: regular play & sale contract with payment fee and sale share fee. It may 
+                     contemplate boarding fee and sale share optionnaly.
+                     Play with Base: Play and sale agreement. With or without boarding fee. Sale share on one
+                     scale for the base, and a different share rate for the excedent."""
+
+        lblCurrency = QLabel("Currency")
+        lblCurrency.setAlignment(Qt.AlignCenter)
+        self.comboCurrency = FocusCombo(itemList=['US', 'AR'])
+        self.comboCurrency.setMaximumSize(70, 25)
+        self.comboCurrency.setModelColumn(1)
+        self.comboCurrency.activated.connect(self.setUpdatable)
+        lblType = QLabel("Agreement Type")
+        lblType.setAlignment(Qt.AlignRight)
+        self.comboAgreementType = FocusCombo(itemList=['Breaking', 'Break & Play', 'Play', 'Play Over Base', 'Play Over Expense'])
+        self.comboAgreementType.setToolTip('Enter the agreement type')
+        self.comboAgreementType.setModelColumn(1)
+        self.comboAgreementType.currentIndexChanged[int].connect(self.getAgreementType)
 
         radioBreaking = QRadioButton("Breaking")
         radioBreaking.setChecked(True)
@@ -165,6 +194,7 @@ class Agreement(QDialog):
         radioOverBase = QRadioButton("Over Base")
         radioFull = QRadioButton("Break and Play")
         radioOverAll = QRadioButton("Over all")
+
 
         self.agreementOption = QButtonGroup()
         self.agreementOption.addButton(radioBreaking)
@@ -290,7 +320,12 @@ class Agreement(QDialog):
         groupBasicLayout.addWidget(lblDate,1,0)
         groupBasicLayout.addWidget(self.dateEdit,1,1)
         #groupBasicLayout.addWidget(self.checkBreaking,1,2)
-        groupBasicLayout.addLayout(agreementOptionLayout,1,3)
+        groupBasicLayout.addWidget(lblType,1,2)
+        groupBasicLayout.addWidget(self.comboAgreementType,1,3)
+        groupBasicLayout.addWidget(lblCurrency, 1,4)
+        groupBasicLayout.addWidget(self.comboCurrency,1,5)
+        groupBasicLayout.addWidget(self.checkUpdatable,2,4)
+        #groupBasicLayout.addLayout(agreementOptionLayout,1,3)
         groupBasicLayout.addWidget(lblSupplier,2,0)
         groupBasicLayout.addWidget(self.comboSupplier,2,1)
         groupBasicLayout.addWidget(lblResponsible,2,2)
@@ -351,6 +386,7 @@ class Agreement(QDialog):
         amountLayout.addRow(lblDownPayment, self.lineDownpayment)
         amountLayout.addRow(lblMinimunPayment, self.spinMinimum)
         amountLayout.addRow(lblInstallments, self.spinInstallments)
+        amountLayout.addRow(self.lblBaseIndex, self.lineBaseIndex)
 
         self.groupAmount = QGroupBox("Payments")
         self.groupAmount.setLayout(amountLayout)
@@ -398,11 +434,28 @@ class Agreement(QDialog):
         self.setMaximumSize(1000, 500)
         self.toggleBreaking()
 
+    @pyqtSlot()
+    def enableIndex(self):
+        self.lineBaseIndex.setEnabled(self.checkUpdatable.checkState())
+        self.lblBaseIndex.setVisible(self.checkUpdatable.checkState())
+
+    @pyqtSlot()
+    def setUpdatable(self):
+        self.checkUpdatable.setVisible(self.comboCurrency.currentIndex())
+        self.lineBaseIndex.setVisible(self.comboCurrency.currentIndex())
+        #self.lblBaseIndex.setVisible(self.comboCurrency.currentIndex())
+
     @pyqtSlot(int)
-    def getAgreementType(self, id):
-        self.agreementType = id
+    def getAgreementType(self, int):
+        self.resetOkToSave()
+        self.agreementType = int
         self.toggleBreaking()
         return
+
+    def resetOkToSave(self):
+        self.okToSave = [None,
+                         QDate.currentDate(), None, None, None]
+        self.lineAmount.setText('0.00')
 
     @pyqtSlot()
     def sendSupplier(self):
@@ -755,7 +808,7 @@ class Agreement(QDialog):
                 if self.qryPlayer.size() < 1:
                     raise APM.DataError("Polo Player", "The Polo Player -Play&Sale- list is empty!")
                 self.modelSupplier.setQuery(self.qryPlayer)
-                self.agreementTitle[1] = "- Play & Sale Agreement - "
+                #self.agreementTitle[1] = "- Play & Sale Agreement - "
                 self.groupSale.setChecked(True)
                 self.spinMinimum.setEnabled(False)
                 self.radioFee.setChecked(True)
@@ -778,7 +831,7 @@ class Agreement(QDialog):
         if self.isVisible():
             try:
                 idx = self.okToSave.index(None)
-                if self.agreementType == 1 and idx == 4:
+                if self.agreementType >= 1 and idx == 4:
                     raise ValueError("Full")
             except ValueError as err:
                 if self.chooseSize is not None:
@@ -838,7 +891,8 @@ class Agreement(QDialog):
                                                              self.groupSale.isChecked(),
                                                              rewrite,
                                                              self.picker.agreementHorses,
-                                                             farmData])
+                                                             farmData,
+                                                             self.comboCurrency.getHiddenData(0)])
                 if not answer[0]:
                     msgBox = QMessageBox()
                     updateButton = QPushButton("UPDATE")

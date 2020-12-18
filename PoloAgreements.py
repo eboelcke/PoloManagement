@@ -1557,7 +1557,7 @@ class MainWindow(QMainWindow):
                     return
                 idData = fh.read(idStruct.size)
                 self.agreementId = idStruct.unpack(idData)[0]
-            with open(self.filename, "rt") as ft:
+            with open(self.filename, "rt", encoding='utf8') as ft:
                 ft.seek(magicStruct.size + idStruct.size)
                 self.text.setText(ft.read())
             fileDescription = os.path.basename(self.filename)
@@ -1568,7 +1568,7 @@ class MainWindow(QMainWindow):
             qry.addBindValue(QVariant(self.agreementId))
             qry.exec()
             qry.first()
-            self.isBreaking = True if qry.value(0) == 0 else False
+            self.isBreaking = True if qry.value(0) in [0, 1] else False
             self.accountBar.setVisible(False)
             self.horses.menuAction().setVisible(True)
             self.prepareAgreementDocks()
@@ -2187,6 +2187,9 @@ class MainWindow(QMainWindow):
 
     def setDockClearance(self):
         self.dockClearance.setWidget(self.setTableClearance())
+
+    def setDockWindows(self):
+        pass
 
     def queryClearance(self):
         try:

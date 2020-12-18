@@ -794,6 +794,7 @@ class Supplier(QDialog):
         try:
             res = Payment(self.db, self.supplierId, mode,parent=self.parent)
             res.show()
+            res.exec()
 
         except APM.DataError as err:
             print(err.source, err.message)

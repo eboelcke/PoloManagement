@@ -35,9 +35,9 @@ class Payment(QDialog):
 
     def setUI(self):
         self.setModal(True)
-        self.setMinimumSize(1000, 600)
         self.setWindowTitle("Payment") if self.mode == OPEN_NEW else  self.setWindowTitle("Edit Payment")
-        self.setMinimumSize(1425, 800)
+        self.setMinimumSize(1000, 700)
+        self.setMaximumSize(1000, 700)
 
         topFrame = QFrame()
         topFrame.setMaximumWidth(3000)
@@ -55,18 +55,54 @@ class Payment(QDialog):
 
         valExchange = QDoubleValidator(0.00, 1.00, 2)
         valAmount = QDoubleValidator(0.00, 999999.99,2)
-        self.lblAmount = QLabel('Amount U$A')
-        self.lineAmount = QLineEdit()
-        self.lineAmount.setAlignment(Qt.AlignRight)
-        self.lineAmount.setMaximumWidth(150)
-        self.lineAmount.setValidator(valAmount)
-        self.lineAmount.textChanged.connect(self.enableSave)
+
+        lblTransaction = QLabel("Transaction No.:")
+        self.lineTransaction = QLineEdit()
+        self.lineTransaction.setAlignment(Qt.AlignRight)
+        self.lineTransaction.setMaximumWidth(150)
+        self.lineTransaction.setEnabled(False)
+
+        #self.lblAmount = QLabel('Pay Amount')
+        #self.lineAmount = QLineEdit()
+        #self.lineAmount.setAlignment(Qt.AlignRight)
+        #self.lineAmount.setMaximumWidth(150)
+        #self.lineAmount.setValidator(valAmount)
+        #self.lineAmount.textChanged.connect(self.enableSave)
+
+        lblAmountToPay = QLabel('Amount to pay')
+        self.lineAmountToPay = QLineEdit()
+        self.lineAmountToPay.setAlignment(Qt.AlignRight)
+        self.lineAmountToPay.setMaximumWidth(150)
+        self.lineAmountToPay.setValidator(valAmount)
+
+        self.lblPayInPesos = QLabel("Amount in AR$:")
+        self.lblPayInPesos.hide()
+        self.linePayInPesos = QLineEdit()
+        self.linePayInPesos.setMaximumWidth(150)
+        self.linePayInPesos.setAlignment(Qt.AlignRight)
+        self.linePayInPesos.setValidator(valAmount)
+        self.linePayInPesos.setEnabled(False)
+        self.linePayInPesos.hide()
+
+        self.checkLocal = QCheckBox("Pay in local Currency", self)
+        self.checkLocal.stateChanged.connect(self.enableRate)
+        self.checkLocal.hide()
+
+        self.lblExchange = QLabel("Exchange Rate")
+        self.lblExchange.hide()
+        self.lineExchange = QLineEdit()
+        self.lineExchange.setMaximumWidth(100)
+        self.lineExchange.setAlignment(Qt.AlignRight)
+        self.lineExchange.setValidator(valAmount)
+        self.lineExchange.setText("1.00")
+        self.lineExchange.setEnabled(False)
+        self.lineExchange.hide()
+        self.lineExchange.editingFinished.connect(self.setLocalPayment)
 
         self.lblCurrency = QLabel("Local Currency")
         self.lblCurrency.setStyleSheet("QLabel {background-color: red; color: white;}")
         self.lblCurrency.hide()
 
-        self.lblCurrency.hide()
         lblPaymentDate = QLabel('Payment Date: ')
         self.paymentDate = QDateEdit()
         self.paymentDate.setCalendarPopup(True)
@@ -79,14 +115,20 @@ class Payment(QDialog):
         lblCurrency = QLabel("Currency")
         self.comboCurrency = FocusCombo(itemList=['USA Dollar', 'Argentine Peso'])
         self.comboCurrency.setMinimumWidth(70)
-        self.comboCurrency.setCurrentIndex(0)
+        currency = self.getCurrency()
+        self.comboCurrency.setCurrentIndex(currency) if currency in [0, 1] else self.comboCurrency.setCurrentIndex(0)
+        self.comboCurrency.setEnabled(False) if currency in [0, 1] else self.comboCurrency.setEnabled(True)
         self.comboCurrency.setModelColumn(1)
-        self.comboCurrency.activated.connect(self.setLocalOption)
+        self.getNumber()
+        self.comboCurrency.activated.connect(self.getNumber)
         self.comboCurrency.activated.connect(self.setInvoices)
+        self.comboCurrency.activated.connect(self.setCurrency)
+
+        self.setCurrency()
 
         lblPaymentType = QLabel("Payment Method")
         self.comboPaymentType = FocusCombo(itemList=['Check', 'Transfer', 'Cash'])
-        self.comboPaymentType.setMinimumWidth(70)
+        self.comboPaymentType.setMinimumWidth(110)
         self.comboPaymentType.setCurrentIndex(-1)
         self.comboPaymentType.setModelColumn(1)
         self.comboPaymentType.activated.connect(self.enableBanks)
@@ -95,22 +137,10 @@ class Payment(QDialog):
         lblBank = QLabel("Bank")
         self.comboBank = FocusCombo(itemList=['Galicia', 'Nacion', 'Provincia', 'Santander',
                                               'Columbia', 'Macro', 'Frances'])
-        self.comboBank.setMinimumWidth(70)
+        self.comboBank.setMinimumWidth(110)
         self.comboBank.setCurrentIndex(-1)
         self.comboBank.setModelColumn(1)
         self.comboBank.activated.connect(self.enableSave)
-
-        self.checkLocal = QCheckBox("Pay in local Currency", self)
-        self.checkLocal.stateChanged.connect(self.enableRate)
-
-        lblExchange = QLabel("Exchange Rate")
-        self.lineExchange = QLineEdit()
-        self.lineExchange.setMaximumWidth(100)
-        self.lineExchange.setAlignment(Qt.AlignRight)
-        self.lineExchange.setValidator(valAmount)
-        self.lineExchange.setText("1.00")
-        self.lineExchange.setEnabled(False)
-        self.lineExchange.editingFinished.connect(self.setLocalPayment)
 
         self.lblTotalDue = QLabel("Total Amount Due")
 
@@ -163,32 +193,32 @@ class Payment(QDialog):
 
         lblNotes = QLabel("Notes")
         self.textNotes = QTextEdit()
+        self.textNotes.setMaximumWidth(412)
         self.textNotes.setMaximumHeight(150)
 
         lblUnpaid = QLabel("Invoices Due")
         lblSelected = QLabel("Invoices Selected for Payment")
         self.setInvoices()
         qryActive, qryPaid = self.getQueries()
-        colorDict = {'column': (11),
+        colorDict = {'column': (10),
                      0: (QColor('white'), QColor('blue')),
                      1: (QColor('red'), QColor('yellow'))}
-        colDict = {0: ("ID", False, True, False, None),
+        colDict = {0: ("ID", True, True, False, None),
                    1: ("Date", False, True, False, None),
                    2: ("Number", False, True, False, None),
-                   3: ("Provider",False, False,False, None),
+                   3: ("Provider",True, False,False, None),
                    4: ("Currency", False, True, True, None),
                    5: ("Amount", False, True, 2, None),
-                   6: ("Paid", False, True, 2, None),
+                   6: ("Paid", True, True, 2, None),
                    7: ("Closed", True, True, True, None),
-                   8: ("CurrencyType", True, False, False, None),
-                   9: ("ExchRate", True, True, False, None),
-                   10: ("Checked", True, True, True, None),
-                   11: ("Removed", True, True, False, None)}
+                   8: ("Currencyid", True, False, False, None),
+                   9: ("Checked", True, True, True, None),
+                   10: ("Removed", True, True, False, None)}
 
         self.tableCheck = TableViewAndModel(colDict=colDict, colorDict=colorDict, size=(100, 200), qry=qryActive)
         self.tableCheck.setObjectName("tableCheck")
         self.tableCheck.setMouseTracking(True)
-        #self.tableCheck.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tableCheck.setMinimumWidth(400)
         self.tableCheck.entered.connect(self.setArrows)
         self.tableCheck.viewportEntered.connect(self.setArrows)
         self.tableCheck.doubleClicked.connect(self.includePayment)
@@ -202,7 +232,9 @@ class Payment(QDialog):
         self.tableBilled.viewportEntered.connect(self.setArrows)
         self.tableBilled.doubleClicked.connect(self.excludePayment)
         self.tableBilled.doubleClicked.connect(self.enableSave)
+        self.tableBilled.setMinimumWidth(400)
 
+        self.refreshTables()
 
         if self.mode == OPEN_EDIT:
             colorInvDict = {'column': (9),
@@ -246,35 +278,24 @@ class Payment(QDialog):
             self.toolClear.clicked.connect(self.clearPayment)
 
         topLayout = QGridLayout()
-        topLayout.addWidget(lblPaymentDate,0,0,Qt.AlignRight)
+        topLayout.addWidget(lblPaymentDate,0,0,Qt.AlignLeft)
         topLayout.addWidget(self.paymentDate,0,1,Qt.AlignLeft)
-        topLayout.addWidget(lblPaymentType,0,2,Qt.AlignRight)
+        topLayout.addWidget(lblPaymentType,0,2,Qt.AlignLeft)
         topLayout.addWidget(self.comboPaymentType,0,3,Qt.AlignLeft)
-        topLayout.addWidget(lblBank,0,4,Qt.AlignRight)
-        topLayout.addWidget(self.comboBank,0,5,Qt.AlignLeft)
-        topLayout.addWidget(lblNumber,0,6,Qt.AlignRight)
-        topLayout.addWidget(self.lineNumber,0,7,Qt.AlignLeft)
-        topLayout.addWidget(lblCurrency,1,0,Qt.AlignRight)
+
+        topLayout.addWidget(lblNumber,0,4,Qt.AlignLeft)
+        topLayout.addWidget(self.lineNumber,0,5,Qt.AlignRight)
+        topLayout.addWidget(lblCurrency,1,0,Qt.AlignLeft)
         topLayout.addWidget(self.comboCurrency,1,1,Qt.AlignLeft)
-        topLayout.addWidget(self.checkLocal,1,2)
-        topLayout.addWidget(lblExchange,1,4,Qt.AlignRight)
-        topLayout.addWidget(self.lineExchange,1,5),Qt.AlignLeft
-        topLayout.addWidget(self.lblAmount,1,6,Qt.AlignRight)
-        topLayout.addWidget(self.lineAmount,1,7,Qt.AlignLeft)
+        topLayout.addWidget(lblBank, 1, 2, Qt.AlignLeft)
+        topLayout.addWidget(self.comboBank, 1, 3, Qt.AlignLeft)
+        topLayout.addWidget(lblTransaction,1,4,Qt.AlignLeft)
+        topLayout.addWidget(self.lineTransaction,1,5,Qt.AlignRight)
         topFrame.setLayout(topLayout)
 
         toolsFrame = QFrame()
         toolsFrame.setMaximumWidth(150)
         toolsFrame.setMaximumHeight(150)
-
-        payFrame = QFrame()
-        payFrame.setMinimumWidth(self.tableBilled.width())
-        payFrame.setMaximumHeight(75)
-
-        payLayout = QHBoxLayout()
-        payLayout.addWidget(self.toolApply)
-        payLayout.addWidget(self.toolPay)
-        payFrame.setLayout(payLayout)
 
         toolsLayout = QVBoxLayout()
         toolsLayout.addWidget(self.toolRight)
@@ -292,10 +313,29 @@ class Payment(QDialog):
         centerLayout.addWidget(toolsFrame,1,1)
         centerLayout.addWidget(self.tableCheck,1,0)
         centerLayout.addWidget(self.tableBilled,1,2)
-        centerLayout.addWidget(self.lblTotalDue,2,0,Qt.AlignRight)
-        centerLayout.addWidget(self.lblAmountToPay,2,2,Qt.AlignRight)
-        centerLayout.addWidget(self.lblCurrency, 3, 0,Qt.AlignLeft)
-        centerLayout.addWidget(payFrame,3,2,Qt.AlignRight)
+        centerLayout.addWidget(self.lblTotalDue,2,0,Qt.AlignLeft)
+        centerLayout.addWidget(self.lblAmountToPay,2,2,Qt.AlignLeft)
+        #centerLayout.addWidget(self.lblCurrency, 3, 0,Qt.AlignLeft)
+        #centerLayout.addWidget(payFrame,3,2,Qt.AlignLeft)
+
+        payLayout = QGridLayout()
+        payLayout.addWidget(lblAmountToPay, 0, 0, Qt.AlignLeft)
+        payLayout.addWidget(self.lineAmountToPay, 0, 4, Qt.AlignRight)
+        payLayout.addWidget(self.checkLocal,1,0)
+        payLayout.addWidget(self.lblExchange,2,0, Qt.AlignLeft)
+        payLayout.addWidget(self.lineExchange,2,1, Qt.AlignRight)
+        payLayout.addWidget(self.lblPayInPesos,3,0,Qt.AlignLeft)
+        payLayout.addWidget(self.linePayInPesos,3,4,Qt.AlignRight)
+
+        payFrame = QFrame()
+        payFrame.setLayout(payLayout)
+        payFrame.setFrameStyle(QFrame.Panel | QFrame.Plain)
+        payFrame.setMaximumWidth(self.tableBilled.width())
+
+
+        paymentLayout = QHBoxLayout()
+        paymentLayout.addWidget(self.textNotes)
+        paymentLayout.addWidget(payFrame)
 
         buttonsLayout = QHBoxLayout()
         if self.mode == OPEN_EDIT:
@@ -304,22 +344,46 @@ class Payment(QDialog):
         buttonsLayout.addWidget(pushCancel)
         buttonsLayout.addWidget(self.pushSave)
 
-        notesLayout = QGridLayout()
-        if self.mode == OPEN_EDIT:
-            notesLayout.addWidget(lblPayments,0,0,Qt.AlignBottom)
-            notesLayout.addWidget(self.tablePayments,1,0,Qt.AlignTop)
-        notesLayout.addWidget(lblNotes,0,1,Qt.AlignBottom)
-        notesLayout.addWidget(self.textNotes,1,1,Qt.AlignTop)
+        #notesLayout = QGridLayout()
+        #if self.mode == OPEN_EDIT:
+        #    notesLayout.addWidget(lblPayments,0,0,Qt.AlignBottom)
+        #    notesLayout.addWidget(self.tablePayments,1,0,Qt.AlignTop)
+        #notesLayout.addWidget(lblNotes,0,1,Qt.AlignBottom)
+        #"notesLayout.addWidget(self.textNotes,1,1,Qt.AlignTop)
 
         layout = QVBoxLayout()
         layout.addWidget(topFrame)
         layout.addLayout(centerLayout)
-        layout.addLayout(notesLayout)
+        layout.addLayout(paymentLayout)
         layout.addLayout(buttonsLayout)
 
         self.setLayout(layout)
         if self.mode == OPEN_EDIT:
             self.textNotes.setMinimumWidth(self.tablePayments.width())
+
+    @pyqtSlot()
+    def setCurrency(self):
+        action = not self.comboCurrency.currentIndex()
+        self.lblPayInPesos.setVisible(action)
+        self.linePayInPesos.setVisible(action)
+        self.checkLocal.setVisible(action)
+        self.lblExchange.setVisible(action)
+        self.lineExchange.setVisible(action)
+
+    @pyqtSlot()
+    def getNumber(self):
+        qryNumber = QSqlQuery(self.db)
+        qryNumber.exec("CALL payment_getnumber({})".format(self.comboCurrency.currentIndex()))
+        if qryNumber.first():
+            self.lineNumber.setText(qryNumber.value(0))
+
+    def getCurrency(self):
+        qry = QSqlQuery(self.db)
+        qry.exec("CALL payment_getcurrency({})".format(self.supplierId))
+        if qry.lastError().type() != 0:
+            raise DataError("Payment getCurrency", qry.lastError().text())
+        if qry.first():
+            return qry.value(0)
 
     @pyqtSlot()
     def clearPayment(self):
@@ -340,7 +404,6 @@ class Payment(QDialog):
         except Exception as err:
             print("clearPayment", err.args)
 
-
     def getPayments(self):
         try:
             qry = QSqlQuery(self.tempDb)
@@ -355,11 +418,8 @@ class Payment(QDialog):
 
     @pyqtSlot()
     def setLocalPayment(self):
-        if self.lineAmount.text() and self.checkLocal.isChecked():
-            self.lblCurrency.setText("Amount to pay in {}: ${:,.2f} ".format(
-                self.comboCurrency.currentText(),
-                float(self.lineAmount.text()) * float(self.lineExchange.text())))
-            self.lblCurrency.setVisible(True)
+        if self.lineAmountToPay.text() and self.checkLocal.isChecked():
+            self.linePayInPesos.setText("{:.2f}".format(float(self.lineAmountToPay.text()) * float(self.lineExchange.text())))
 
     def setTemporaryTables(self):
         try:
@@ -367,6 +427,8 @@ class Payment(QDialog):
             qry.exec("CALL payment_initializeinvoices()")
             if qry.lastError().type() != 0:
                 raise DataError("setTemporaryTables(Payment)", qry.lastError().text())
+            if qry.first():
+                raise DataError("Payment setTemporaryTables", qry.value(0) +' ' + qry.value(1))
         except DataError as err:
             print(err.source, err.message)
 
@@ -380,28 +442,28 @@ class Payment(QDialog):
             self.toolAllRight.setEnabled(action)
             self.toolLeft.setEnabled(not action)
             self.toolAllLeft.setEnabled(not action)
-            if self.tableBilled.currentIndex().row() != -1:
+            if self.tableBilled.currentIndex().row() != -1 and self.mode == OPEN_EDIT:
                 self.toolClear.setEnabled(not action)
 
     @pyqtSlot(int)
     def setLocalOption(self, option):
-        if option == 0:
-            self.lineExchange.setEnabled(False)
-            self.lblAmount.setText("Amount (u$a)")
-            self.checkLocal.setEnabled(True)
-        else:
-            self.lblAmount.setText("Amount ($)")
+        pass
+        #if option == 0:
+        #    self.lineExchange.setEnabled(False)
+        #    self.lblAmount.setText("Amount (u$a)")
+        #    self.checkLocal.setEnabled(True)
+        #else:
+        #    self.lblAmount.setText("Amount ($)")
 
     def setInvoices(self):
         try:
-            rate = 'NULL' if self.comboCurrency.getHiddenData(0) == 0 \
-                    and not  self.checkLocal else float(self.lineExchange.text())
             qryLoad = QSqlQuery(self.tempDb)
-            qryLoad.exec("CALL payment_loadinvoicestopay({})".format(self.supplierId))
+            qryLoad.exec("CALL payment_loadinvoicestopay({}, {})".format(
+                self.supplierId, self.comboCurrency.currentIndex()))
             if qryLoad.lastError().type() != 0:
                 raise DataError('setInvoices', qryLoad.lastError().text())
             if qryLoad.first():
-                raise DataError("setInvoices", qry.value(0), qry.value(1))
+                raise DataError("setInvoices", qryLoad.value(0), qryLoad.value(1))
             if self.isVisible():
                 self.refreshTables()
         except DataError as err:
@@ -410,15 +472,15 @@ class Payment(QDialog):
     @pyqtSlot()
     def applyPayment(self):
         try:
-            if self.tableBilled.model().query().size() < 1 or not self.lineAmount.text():
+            if self.tableBilled.model().query().size() < 1: # or not self.lineAmount.text():
                 return
             qry = QSqlQuery(self.tempDb)
-            qry.exec("CALL payment_applypayment('{}')".format(self.lineAmount.text()))
+            qry.exec("CALL payment_applypayment('{}')".format(self.lineAmountToPay.text()))
             if qry.lastError().type() != 0:
                 raise DataError("applyPayment", qry.lastError().text())
             if qry.first():
                 if qry.value(0) > 0:
-                    self.lineAmount.setText("{:.2f}".format(float(self.lineAmount.text()) - qry.value(0)))
+                    self.lineAmountToPay.setText("{:.2f}".format(float(self.lineAmountToPay.text()) - qry.value(0)))
             self.refreshTables()
             self.setLocalPayment()
             self.enableSave()
@@ -430,7 +492,7 @@ class Payment(QDialog):
     @pyqtSlot()
     def payAllSelected(self):
         try:
-            self.lineAmount.setText(str(self.selectedAmount))
+            self.lineAmountToPay.setText(str(self.selectedAmount))
             qry = QSqlQuery(self.tempDb)
             qry.exec("CALL payment_payallselected()")
             if qry.lastError().type() != 0:
@@ -453,14 +515,14 @@ class Payment(QDialog):
             if qry.lastError().type() != 0:
                 raise DataError("refreshTables", qry.lastError().text())
             if qry.first():
-                symbol = '$' if self.comboCurrency.getHiddenData(0) == 0 else 'AR$'
-                self.lblTotalDue.setText("Total Amount Due: {}{:,.2f}".format(symbol, qry.value(0)))
-                self.lblAmountToPay.setText("Amount Selected for Payment: {}{:,.2f}. Amount to pay: {}{:,.2f}".format(
-                    symbol, qry.value(1), symbol, qry.value(2)))
+                symbol = 'U$A' if self.comboCurrency.getHiddenData(0) == 0 else 'AR$'
+                self.lblTotalDue.setText("Total Amount Due: {} {:,.2f}".format(symbol, qry.value(0)))
+                self.lblAmountToPay.setText("Selected for Payment: {} {:,.2f}".format(symbol, qry.value(1)))
                 self.selectedAmount = qry.value(1)
-                self.amountToPay = qry.value(2)
+                self.lineAmountToPay.setText(str(qry.value(1)))
+                #self.amountToPay = qry.value(2)
                 if self.checkLocal.isChecked():
-                    self.setLocalOption(True)
+                    self.setLocalPayment()
             qryFrom, qryTo = self.getQueries()
             self.tableCheck.model().setQuery(qryFrom)
             self.tableBilled.model().setQuery(qryTo)
@@ -493,18 +555,12 @@ class Payment(QDialog):
 
     @pyqtSlot(int)
     def enableRate(self, state):
-        if state == Qt.Checked:
-            self.lineExchange.setEnabled(True)
-            self.lineExchange.selectAll()
-            self.lineExchange.setFocus()
-            self.comboCurrency.setCurrentIndex(1)
-            self.setLocalPayment()
-        else:
-            self.lineExchange.setEnabled(False)
-            self.lblAmount.setText("Amount (u$a)")
-            self.lineExchange.setText("1.00")
-            self.comboCurrency.setCurrentIndex(0)
-            self.setInvoices()
+        action = True if state == 2 else False
+        self.lineExchange.setEnabled(action)
+        self.lineExchange.selectAll()
+        self.lineExchange.setFocus()
+        self.linePayInPesos.setEnabled(action)
+        self.setLocalPayment()
 
     @pyqtSlot(QModelIndex)
     def loadPayment(self, idx):
@@ -514,7 +570,7 @@ class Payment(QDialog):
             if qry.seek(row):
                 self.paymentDate.setDate(qry.value(1))
                 self.lineNumber.setText(qry.value(4))
-                self.lineAmount.setText(str(qry.value(6)))
+                self.lineAmountToPay.setText(str(qry.value(6)))
                 self.comboBank.setCurrentIndex(qry.value(10))
                 self.comboPaymentType.setCurrentIndex(qry.value(8))
                 self.comboCurrency.setCurrentIndex(qry.value(9))
@@ -557,7 +613,7 @@ class Payment(QDialog):
     def resetWidget(self):
         try:
             self.lineNumber.clear()
-            self.lineAmount.clear()
+            self.lineAmountToPay.clear()
             self.comboBank.setCurrentIndex(-1)
             self.comboPaymentType.setCurrentIndex(-1)
             self.comboCurrency.setCurrentIndex(-1)
@@ -583,7 +639,7 @@ class Payment(QDialog):
     @pyqtSlot()
     def enableSave(self):
         try:
-            if float(self.lineAmount.text()) == self.amountToPay and \
+            if float(self.lineAmountToPay.text()) == self.amountToPay and \
                 self.comboPaymentType.currentIndex() != -1 and \
                 (self.comboPaymentType.currentIndex() == 2 or (self.comboPaymentType.currentIndex() != 2 and
                 self.comboBank.currentIndex() != -1)) and self.lineNumber.text():
@@ -700,9 +756,9 @@ class Payment(QDialog):
                 self.paymentDate.date().toString("yyyy-MM-dd"),
                 self.comboPaymentType.getHiddenData(0),
                 self.supplierId,
-                float(self.lineAmount.text()),
+                float(self.lineAmountToPay.text()),
                 self.comboCurrency.getHiddenData(0),
-                ("'" + "{}".format(float(self.lineAmount.text()) * float(self.lineExchange.text()) ) + "'") \
+                " {:.2f}".format(float(self.lineAmountToPay.text()) * float(self.lineExchange.text()) ) \
                     if self.checkLocal.isChecked() else 'NULL',
                 self.comboBank.getHiddenData(0) if self.comboBank.currentIndex() != -1 else 'NULL',
                 'NULL' if self.mode == OPEN_NEW else 1))
@@ -760,6 +816,7 @@ class Invoice(QDialog):
         self.lineNumber = QLineEdit()
         self.lineNumber.setMaximumWidth(100)
         self.lineNumber.setAlignment(Qt.AlignRight)
+        self.lineNumber.setText(self.getInvoiceNumber())
         self.lineNumber.editingFinished.connect(self.enableSave)
 
         self.lblTotal = QLabel('Total U$A')
@@ -768,7 +825,6 @@ class Invoice(QDialog):
         self.lineTotal.setMaximumWidth(150)
         self.lineTotal.setEnabled(False)
         self.lineTotal.editingFinished.connect(self.enableSave)
-
         self.lblGrandTotal = QLabel("Total U$A")
         self.lblGrandTotal.hide()
         self.lineGrandTotal = QLineEdit()
@@ -787,6 +843,7 @@ class Invoice(QDialog):
         self.lineCurrencyTotal.editingFinished.connect(self.enableSave)
 
         billDate, fromDate, toDate = self.getDates() #self.getDates()
+        currency = self.getCurrency(billDate.toString("yyyy-MM-dd"))
 
         lblDate = QLabel('Invoice Date: ')
         self.dateInvoice = QDateEdit()
@@ -812,7 +869,6 @@ class Invoice(QDialog):
         self.dateTo.setDisplayFormat('MM-dd-yyyy')
         self.dateTo.setMinimumWidth(120)
 
-        #self.setPeriod()
 
         lblType = QLabel("Type")
         lblType.setStyleSheet("QLabel {background-color: red; color: white;}")
@@ -835,9 +891,10 @@ class Invoice(QDialog):
         lblCurrency = QLabel("Currency")
         self.comboCurrency = FocusCombo(itemList=['USA Dollar', 'Argentine Peso'])
         self.comboCurrency.setMinimumWidth(70)
-        self.comboCurrency.setCurrentIndex(0)
+        self.comboCurrency.setEnabled(False) if currency in [0,1] else self.comboCurrency.setEnable(True)
+        self.comboCurrency.setCurrentIndex(currency) if currency in [0,1] else self.comboCurrency.setCurrentIndex(0)
         self.comboCurrency.setModelColumn(1)
-        self.comboCurrency.activated.connect(self.setCurrency)
+        self.comboCurrency.activated.connect(self.updatePayables)
 
         self.lblIva = QLabel("IVA 21%")
         self.lblIva.hide()
@@ -846,7 +903,7 @@ class Invoice(QDialog):
         self.lineIva.setAlignment(Qt.AlignRight)
         self.lineIva.setEnabled(False)
         self.lineIva.hide()
-
+        """
         valExchange = QDoubleValidator(0.00, 999999.99,2)
 
         lblExchange = QLabel("Exchange Rate")
@@ -857,7 +914,7 @@ class Invoice(QDialog):
         self.lineExchange.setText("1.00")
         self.lineExchange.setEnabled(False)
         self.lineExchange.editingFinished.connect(self.refreshTables)
-
+        """
         self.textNotes = QTextEdit()
 
         colorDict = {'column': (9),
@@ -924,7 +981,7 @@ class Invoice(QDialog):
 
             self.textNotes.setMaximumHeight(self.tableInvoices.height())
 
-        self.lblSpinIva = QLabel("Set IVA(%)")
+        self.lblSpinIva = QLabel("IVA(%)")
         self.lblSpinIva.setVisible(False)
 
         self.spinIva = FocusSpin()
@@ -932,8 +989,8 @@ class Invoice(QDialog):
         self.spinIva.setMaximumWidth(50)
         self.spinIva.setValue(21)
         self.spinIva.setVisible(False)
-        self.spinIva.focusLost.connect(self.refreshTotals)
-        self.spinIva.focusLost.connect(self.upgradeIvaLbl)
+        self.spinIva.valueChanged.connect(self.refreshTotals)
+        self.spinIva.valueChanged.connect(self.upgradeIvaLbl)
 
         pushCancel = QPushButton("Exit")
         pushCancel.setMaximumWidth(70)
@@ -950,6 +1007,8 @@ class Invoice(QDialog):
 
         invoiceLayout_1.addWidget(lblSupplier)
         invoiceLayout_1.addWidget(self.lineSupplier)
+        invoiceLayout_1.addWidget(lblCurrency)
+        invoiceLayout_1.addWidget(self.comboCurrency)
         invoiceLayout_1.addWidget(lblInvoice)
         invoiceLayout_1.addWidget(self.comboInvoiceType)
         invoiceLayout_1.addWidget(lblType)
@@ -957,7 +1016,7 @@ class Invoice(QDialog):
         invoiceLayout_1.addWidget(lblNumber)
         invoiceLayout_1.addWidget(self.lineNumber)
 
-        invoiceLayout.addWidget(lblDate, 0, Qt.AlignRight)
+        invoiceLayout.addWidget(lblDate, 0, Qt.AlignLeft)
         invoiceLayout.addWidget(self.dateInvoice,0,Qt.AlignLeft )
 
         invoiceLayout.addWidget(lblFrom, 0, Qt.AlignRight)
@@ -968,7 +1027,28 @@ class Invoice(QDialog):
         invoiceVLayout.addLayout(invoiceLayout_1)
         invoiceVLayout.addLayout(invoiceLayout)
 
-        topFrame.setLayout(invoiceVLayout)
+        topLayout = QGridLayout()
+        topLayout.addWidget(lblSupplier,0,0,Qt.AlignLeft)
+        topLayout.addWidget(self.lineSupplier,0,1,Qt.AlignLeft)
+        topLayout.addWidget(lblInvoice,0,2,Qt.AlignLeft)
+        topLayout.addWidget(self.comboInvoiceType,0,3, Qt.AlignLeft)
+        topLayout.addWidget(lblCurrency,0,4, Qt.AlignLeft)
+        topLayout.addWidget(self.comboCurrency, 0, 5, Qt.AlignLeft)
+        topLayout.addWidget(lblNumber,0,6, Qt.AlignRight)
+        topLayout.addWidget(self.lineNumber,0,7,Qt.AlignRight)
+
+        topLayout.addWidget(lblDate, 1, 0, Qt.AlignLeft)
+        topLayout.addWidget(self.dateInvoice, 1, 1, Qt.AlignLeft)
+        topLayout.addWidget(lblFrom, 1, 2, Qt.AlignLeft)
+        topLayout.addWidget(self.dateFrom, 1, 3, Qt.AlignLeft)
+        topLayout.addWidget(lblTo, 1, 4, Qt.AlignLeft)
+        topLayout.addWidget(self.dateTo, 1, 5, Qt.AlignLeft)
+        topLayout.addWidget(lblType, 1, 6, Qt.AlignRight)
+        topLayout.addWidget(self.comboType, 1, 7, Qt.AlignRight)
+
+
+
+        topFrame.setLayout(topLayout)
 
         lblDue = QLabel("Payables Due")
         lblChoose = QLabel("Selected Charges")
@@ -979,20 +1059,18 @@ class Invoice(QDialog):
         tablesLayout.addWidget(self.tableBilled,1,1)
 
         totalLayout = QGridLayout()
-        totalLayout.addWidget(lblCurrency,0,0, Qt.AlignRight)
-        totalLayout.addWidget(self.comboCurrency,0,1, Qt.AlignRight)
-        totalLayout.addWidget(lblExchange,0,2,Qt.AlignRight)
-        totalLayout.addWidget(self.lineExchange,0,3,Qt.AlignRight)
-        totalLayout.addWidget(self.lblTotal,0,4, Qt.AlignRight)
+
+        totalLayout.addWidget(self.lblSpinIva, 0, 0, Qt.AlignLeft)
+        totalLayout.addWidget(self.spinIva, 0, 3, Qt.AlignLeft)
+        totalLayout.addWidget(self.lblTotal,0,4, Qt.AlignLeft)
         totalLayout.addWidget(self.lineTotal,0,5,Qt.AlignRight)
-        totalLayout.addWidget(self.lblSpinIva,1,2,Qt.AlignRight)
-        totalLayout.addWidget(self.spinIva,1,3,Qt.AlignRight)
-        totalLayout.addWidget(self.lblIva,1,4, Qt.AlignRight)
+
+        totalLayout.addWidget(self.lblIva,1,4, Qt.AlignLeft)
         totalLayout.addWidget(self.lineIva,1,5, Qt.AlignRight)
-        totalLayout.addWidget(self.lblGrandTotal,2,4,Qt.AlignRight)
-        totalLayout.addWidget(self.lineGrandTotal,2,5,Qt.AlignRight)
-        totalLayout.addWidget(self.lblCurrencyTotal, 3, 4, Qt.AlignRight)
-        totalLayout.addWidget(self.lineCurrencyTotal, 3, 5, Qt.AlignRight)
+        totalLayout.addWidget(self.lblGrandTotal,2,4, Qt.AlignLeft)
+        totalLayout.addWidget(self.lineGrandTotal,2,5, Qt.AlignRight)
+        #totalLayout.addWidget(self.lblCurrencyTotal, 3, 4, Qt.AlignLeft)
+        #totalLayout.addWidget(self.lineCurrencyTotal, 3, 5, Qt.AlignRight)
 
         totalFrame = QFrame()
         totalFrame.setLayout(totalLayout)
@@ -1065,7 +1143,7 @@ class Invoice(QDialog):
             self.lineGrandTotal.setText(str(record.value(4)))
             self.dateFrom.setDate(record.value(5))
             self.dateTo.setDate(record.value(6))
-            self.lineExchange.setText(str(record.value(7)))
+            #self.lineExchange.setText(str(record.value(7)))
             self.comboCurrency.setCurrentIndex(record.value(8))
             self.comboType.setCurrentIndex(record.value(9))
             self.textNotes.setText(record.value(10))
@@ -1126,6 +1204,14 @@ class Invoice(QDialog):
         except Exception as err:
             print("getDates", err.args)
 
+    def getCurrency(self, invDate):
+        qry = QSqlQuery(self.db)
+        qry.exec("CALL invoice_currency({}, '{}')".format(self.supplierId, invDate))
+        if qry.first():
+            return qry.value(0)
+        raise Exception("getCurrency " + qry.lastError().text())
+
+
     @pyqtSlot()
     def setPeriod(self):
         if self.isVisible() :
@@ -1138,9 +1224,9 @@ class Invoice(QDialog):
         if not self.lineNumber.text() or \
             not self.lineTotal.text():
             return
-        if self.lineCurrencyTotal.isEnabled():
-            if not self.lineCurrencyTotal.text():
-                return
+        #if self.lineCurrencyTotal.isEnabled():
+        #    if not self.lineCurrencyTotal.text():
+        #        return
         self.pushSave.setEnabled(True)
 
     @pyqtSlot()
@@ -1177,10 +1263,11 @@ class Invoice(QDialog):
     def getPayables(self):
         try:
             qry = QSqlQuery(self.tempDb)
-            qry.exec("CALL invoice_loadpayables({}, '{}', '{}', {})".format(self.supplierId,
+            qry.exec("CALL invoice_loadpayables({}, '{}', '{}', {}, {})".format(self.supplierId,
                                                                         self.dateFrom.date().toString("yyyy-MM-dd"),
                                                                         self.dateTo.date().toString("yyyy-MM-dd"),
-                                                                            self.payableType))
+                                                                        self.payableType,
+                                                                        self.comboCurrency.currentIndex()))
             if qry.lastError().type() != 0:
                 raise DataError("getPayables", qry.lastError().text())
             qryBill = QSqlQuery(self.tempDb)
@@ -1225,12 +1312,19 @@ class Invoice(QDialog):
             self.lineGrandTotal.setText(self.lineTotal.text())
             if int(self.comboType.getHiddenData(0)) !=0 or int(self.comboCurrency.getHiddenData(0)) != 0:
                 self.refreshTotals()
+            self.refreshTotals()
             self.tableBilled.hideColumn(10)
             if self.mode == OPEN_EDIT:
                 self.pushReset.setEnabled(False)
                 self.pushDelete.setEnabled(False)
         except DataError as err:
             print(err.source, err.message)
+
+    def getInvoiceNumber(self):
+        qry = QSqlQuery(self.db)
+        qry.exec("CALL invoice_getnumber({})".format(self.supplierId))
+        if qry.first():
+            return qry.value(0)
 
     def refreshTotals(self):
         try:
@@ -1243,14 +1337,10 @@ class Invoice(QDialog):
                 self.lineIva.clear()
                 self.lineGrandTotal.setText(self.lineTotal.text())
             if int(self.comboType.getHiddenData(0)) == 1:
-                self.lblIva.setText("IVA" + str(self.spinIva.value()) + "%")
+                self.lblIva.setText("IVA " + str(self.spinIva.value()) + "%")
                 self.lineIva.setText('{:.2f}'.format(amount * iva))
                 self.lineGrandTotal.setText('{:.2f}'.format(amount * 1.21))
-                self.lineCurrencyTotal.setText('{:.2f}'.format(float(self.lineGrandTotal.text()) *
-                                               float(self.lineExchange.text())))
-            if self.comboCurrency.currentIndex() > 0:
-                self.lineCurrencyTotal.setText('{:.2f}'.format(float(self.lineGrandTotal.text()) *
-                                                               float(self.lineExchange.text())))
+                # self.lineCurrencyTotal.setText('{:.2f}'.format(float(self.lineGrandTotal.text()
         except ValueError:
             return
         except Exception as err:
@@ -1289,32 +1379,32 @@ class Invoice(QDialog):
             print(err.source, err.message)
 
     @pyqtSlot(int)
-    def addIVA(self, num):
+    def addIVA(self):
         try:
             if int(self.comboType.getHiddenData(0)) == 1:
+                self.lblTotal.setText("Subtotal")
+                self.lblSpinIva.setVisible(True)
+                self.spinIva.setVisible(True)
                 self.lblIva.setVisible(True)
                 self.lineIva.setVisible(True)
                 self.lblGrandTotal.setVisible(True)
                 self.lineGrandTotal.setVisible(True)
-                self.lblSpinIva.setVisible(True)
-                self.spinIva.setVisible(True)
-                self.lblTotal.setText("Subtotal U$A")
             else:
                 self.lblIva.setVisible(False)
                 self.lineIva.setVisible(False)
-                self.lblGrandTotal.setVisible(False)
-                self.lineGrandTotal.setVisible(False)
+                self.lblGrandTotal.setVisible(True)
+                self.lineGrandTotal.setVisible(True)
                 self.lblSpinIva.setVisible(False)
                 self.spinIva.setVisible(False)
-                self.lblTotal.setText("Total U$A")
+                self.lblTotal.setText("Subtotal")
             self.refreshTotals()
         except ValueError:
             return
         except Exception as err:
             print('addIVA', err.args)
 
-    @pyqtSlot(int)
-    def setCurrency(self,num):
+
+        """
         if int(self.comboCurrency.getHiddenData(0)) == 0:
             self.lblCurrencyTotal.hide()
             self.lineCurrencyTotal.hide()
@@ -1327,7 +1417,7 @@ class Invoice(QDialog):
             self.lineCurrencyTotal.show()
             self.lineExchange.clear()
             self.lineExchange.setEnabled(True)
-
+        """
     @pyqtSlot()
     def saveAndClose(self):
         if self.mode == OPEN_EDIT:
@@ -1335,24 +1425,24 @@ class Invoice(QDialog):
             return
         try:
             qry = QSqlQuery(self.tempDb)
-            qry.exec("CALL invoice_save({}, '{}','{}', '{}', '{}', '{}', '{}',{}, {}, '{}','{}',{}, {})".format(
+            qry.exec("CALL invoice_save({}, '{}','{}', '{}', '{}', '{}',{}, {}, '{}','{}',{}, {})".format(
                 self.supplierId,
                 self.lineNumber.text(),
                 self.dateFrom.date().toString("yyyy-MM-dd"),
                 self.dateTo.date().toString("yyyy-MM-dd"),
                 self.dateInvoice.date().toString("yyyy-MM-dd"),
                 self.lineGrandTotal.text(),
-                self.lineExchange.text(),
                 self.comboCurrency.getHiddenData(0),
                 self.comboType.getHiddenData(0),
                 self.textNotes.toPlainText(),
                 self.lineTotal.text(),
-                "'" + self.lineIva.text() + "'" if self.lineIva.text().isnumeric() else 'NULL',
+                "'" + self.lineIva.text() + "'" if self.lineIva.isVisible() else 'NULL',
                 "'" + str(self.spinIva.value() * 0.01) + "'" if self.comboType.currentIndex() == 1 else 'NULL'))
             if qry.lastError().type() != 0:
                 raise DataError("saveAndClose", qry.lastError().text())
             if qry.first():
-                print(qry.value(0))
+                print(qry.value(0), ' ' ,qry.value(1))
+                raise DataError(" Invoice Save and Close", qry.value(0) + ' ' + qry.value(1))
             self.refreshTables()
             self.parent.refreshInvoicesTable()
             self.widgetClose()
@@ -1460,6 +1550,7 @@ class Payables(QDialog):
         self.lineNumber = QLineEdit()
         self.lineNumber.setMaximumWidth(100)
         self.lineNumber.setAlignment(Qt.AlignRight)
+        self.lineNumber.setText(self.getNumber())
         self.lineNumber.editingFinished.connect(self.enableSave)
 
         self.lblTotal = QLabel('Total Amount:')
@@ -1470,7 +1561,21 @@ class Payables(QDialog):
         self.lineTotal.setEnabled(False)
         self.lineTotal.editingFinished.connect(self.enableSave)
 
-        billdate, fromdate, todate = self.getDates()
+        billdate = self.getDates()
+        if billdate is not None:
+            billdate = billdate.addMonths(1)
+            fromdate = billdate.addMonths(-1)
+            todate = fromdate.addDays(fromdate.daysInMonth()-1)
+
+        lblDate = QLabel('Date: ')
+        self.dateInvoice = QDateEdit()
+        self.dateInvoice.setDisplayFormat('yyyy-MM-dd')
+        self.dateInvoice.setCalendarPopup(True)
+        self.dateInvoice.setDate(billdate)
+        self.dateInvoice.setMinimumWidth(120)
+        self.dateInvoice.dateChanged.connect(self.enableSave)
+        self.dateInvoice.dateChanged.connect(self.setPeriod)
+        self.dateInvoice.dateChanged.connect(self.updateElegibleHorses)
 
         lblFrom = QLabel('From: ')
         self.dateFrom = QDateEdit()
@@ -1486,22 +1591,18 @@ class Payables(QDialog):
         self.dateTo.setMinimumWidth(120)
         self.dateTo.setDate(todate)
 
+        lblCurrency = QLabel("Currency")
+        self.comboCurrency = FocusCombo(itemList = ['U$A', 'AR$'])
+        self.comboCurrency.setCurrentIndex(-1)#(self.getCurrency())
+        self.comboCurrency.setModelColumn(1)
+        self.comboCurrency.activated.connect(self.getHorses)
+
         lblInvoice = QLabel("Payable for: ")
         self.comboInvoiceType = FocusCombo(itemList=['DownPayment', 'Board', 'Half Break', 'Final Break', 'Sale Share'])
         self.comboInvoiceType.setMinimumWidth(70)
         self.comboInvoiceType.setCurrentIndex(self.payableType)
         self.comboInvoiceType.setModelColumn(1)
         self.comboInvoiceType.setEnabled(False)
-
-        lblDate = QLabel('Date: ')
-        self.dateInvoice = QDateEdit()
-        self.dateInvoice.setCalendarPopup(True)
-        self.dateInvoice.setDate(billdate)
-        self.dateInvoice.setDisplayFormat('yyyy-MM-dd')
-        self.dateInvoice.setMinimumWidth(120)
-        self.dateInvoice.dateChanged.connect(self.enableSave)
-        self.dateInvoice.dateChanged.connect(self.setPeriod)
-        self.dateInvoice.dateChanged.connect(self.updateElegibleHorses)
 
         self.checkLocation = QCheckBox("Disable Location Check")
 
@@ -1519,7 +1620,8 @@ class Payables(QDialog):
                    4: ("Days", False, True, True, None),
                    5: ("Installment", False, True, 2, None),
                    6: ("Total", True, True, False, None),
-                   7:("Payableid", True, True, False, None)}
+                   7:("Payableid", True, True, False, None),
+                   8:("Currency", True, True, False, None)}
         qry, qryBilled = self.getHorses()
         self.tableCheck = TableViewAndModel(colDict=colDict, colorDict=colorDict, size=(100, 200), qry=qry)
         self.tableCheck.doubleClicked.connect(self.includeExcludeHorses)
@@ -1530,7 +1632,8 @@ class Payables(QDialog):
                      1: ("Horse", False, True, False, None),
                      2: ("Concept", False, False, False, None),
                      3: ("Amount", False, True, 2, None),
-                     4:("Payableid", True, True, False, 0)}
+                     4:("Payableid", True, True, False, 0),
+                     5:("Currency", True, True, False, None)}
 
         self.tableBilled = TableViewAndModel(colDict=colBilled, colorDict=colorDict, size=(100, 200), qry=qryBilled)
         self.tableBilled.doubleClicked.connect(self.includeExcludeHorses)
@@ -1586,6 +1689,8 @@ class Payables(QDialog):
 
         invoiceLayout_1.addWidget(lblSupplier)
         invoiceLayout_1.addWidget(self.lineSupplier)
+        invoiceLayout_1.addWidget(lblCurrency)
+        invoiceLayout_1.addWidget(self.comboCurrency)
         invoiceLayout_1.addWidget(lblInvoice)
         invoiceLayout_1.addWidget(self.comboInvoiceType)
         invoiceLayout_1.addWidget(lblNumber)
@@ -1647,17 +1752,52 @@ class Payables(QDialog):
         self.checkLocation.setVisible(True) if self.payableType == PAYABLES_TYPE_BOARD else \
             self.checkLocation.setVisible(False)
 
+    def getNumber(self):
+        qry = QSqlQuery(self.db)
+        qry.exec("CALL payables_getticketnumber({})".format(self.supplierId))
+        if qry.lastError().type() != 0:
+            raise DataError("getNumber", qry.lastError().text())
+        if qry.first():
+            return qry.value(0)
+
+    def getCurrency(self):
+        us = ar = None
+        qryus = QSqlQuery(self.tempDb)
+        qryar = QSqlQuery(self.tempDb)
+        qryus.exec("SELECT currency FROM billablehorses WHERE currency = 0")
+        if qryus.first():
+            us = qryus.value(0)
+        qryar.exec("SELECT currency FROM billablehorses WHERE currency = 1")
+        if qryar.first():
+            ar = qryar.value(0)
+        if us is not None and ar is not None:
+            ans = QMessageBox.question(self, "Currency", "There are charges in us dollars and in argentine pesos. "
+                                                   "Process us dollar charges?", QMessageBox.Ok|QMessageBox.No)
+            if ans == QMessageBox.Yes:
+                self.comboCurrency.setCurrentIndex(0)
+                return
+            else:
+                self.comboCurrency.setCurrentIndex(1)
+                return
+        elif us is not None:
+            self.comboCurrency.setCurrentIndex(0)
+        elif ar is not None:
+            self.comboCurrency.setCurrentIndex(1)
+        else:
+            QMessageBox.warning(self, "Charges", "Currently there are not charges to enter!", QMessageBox.Ok)
+        self.comboCurrency.setEnabled(False)
+
+
     @pyqtSlot()
     def getDates(self, invDate=None):
         try:
             invDate = 'NULL' if invDate is None else invDate
             qry = QSqlQuery(self.db)
-            #qry.exec("CALL invoice_getdates({},{})".format(self.supplierId, invDate))
             qry.exec("CALL system_minimumsupplierdate({})".format(self.supplierId))
             if qry.lastError().type() != 0:
                 raise DataError("getDates", qry.lastError().text())
             if qry.first():
-                return qry.value(0), qry.value(1), qry.value(2)
+                return qry.value(0)
         except DataError as err:
             print(err.source, err.message)
 
@@ -1674,7 +1814,7 @@ class Payables(QDialog):
 
     def getLastBoardDate(self):
         try:
-            qry = QSqlQuery(self.db)
+            qry = QSqlQuery( self.db)
             qry.prepare("""SELECT MAX(b.boardingdate), MAX(ah.dos)  FROM 
             agreementhorses ah 
             INNER JOIN agreements a 
@@ -1738,7 +1878,7 @@ class Payables(QDialog):
             qry = QSqlQuery(self.tempDb)
             qry.exec('CALL payables_delete({}, {})'.format(self.record.value(0),self.payableType))
             if qry.lastError().type() != 0:
-                raise DataError("deleteCheare", qry.lastError().text())
+                raise DataError("deleteCharge", qry.lastError().text())
             if qry.first():
                 print(qry.value(0))
             self.refreshTables()
@@ -1755,7 +1895,7 @@ class Payables(QDialog):
 
     @pyqtSlot()
     def setPeriod(self):
-        self.dateInvoice.setDate(self.dateInvoice.date().addDays(-self.dateInvoice.date().day()+1))
+        #self.dateInvoice.setDate(self.dateInvoice.date().addDays(-self.dateInvoice.date().day()+1))
         self.dateTo.setDate(self.dateInvoice.date().addDays(-1))
         self.dateFrom.setDate(self.dateInvoice.date().addDays(-
                 self.dateInvoice.date().addDays(-28).daysInMonth()))
@@ -1776,14 +1916,16 @@ class Payables(QDialog):
                 self.lastDate = self.dateFrom.date()
                 if not self.checkLocation.isChecked():
                     qry.prepare("""INSERT INTO billablehorses 
-                    (id, horse, agrid, dos, months, installment, totalamount)
+                    (id, horse, agrid, dos, months, installment, totalamount, payableid, currency)
                     SELECT DISTINCT
                     ah.id, h.name, a.id,
                     ah.dos,
                     TIMESTAMPDIFF(MONTH, ah.dos, ?) Months, 
                     IF (a.installments = 0 ,ROUND(a.totalamount - a.downpayment) ,
-                        ROUND((a.totalamount - a.downpayment)/ a.installments, 2)) inst,
-                    a.totalamount
+                        ROUND((a.totalamount - a.downpayment)/ a.installments, 2)),
+                    a.totalamount,
+                    NULL,
+                    a.currency
                     FROM horses h
                     INNER JOIN agreementhorses ah
                     ON h.id = ah.horseid
@@ -1813,13 +1955,15 @@ class Payables(QDialog):
                     qry.addBindValue(QVariant(self.supplierId))
                 else: #Option to disable location checking checked
                     qry.prepare("""INSERT INTO billablehorses 
-                                        (id, horse, agrid, dos, months, installment, totalamount)
+                                        (id, horse, agrid, dos, months, installment, totalamount, payableid, currency)
                     SELECT DISTINCT
                     ah.id, h.name, a.id,
                     ah.dos,
                     TIMESTAMPDIFF(MONTH, ah.dos, ?) Months, 
                     ROUND((a.totalamount - a.downpayment)/ a.installments, 2) inst,
-                    a.totalamount
+                    a.totalamount,
+                    NULL,
+                    a.currency
                     FROM horses h
                     INNER JOIN agreementhorses ah
                     ON h.id = ah.horseid
@@ -1839,13 +1983,15 @@ class Payables(QDialog):
             elif self.payableType == PAYABLES_TYPE_DOWNPAYMENT:
                 qry.prepare("""INSERT INTO billablehorses 
                                     (id, horse, agrid, dos, months, installment,
-                                     totalamount)
+                                     totalamount, payableid, currency)
                                     SELECT 
                                     ah.id, h.name, a.id,
                                     ah.dos,
-                                    TIMESTAMPDIFF(DAY, a.date, ?) days,
-                                    a.downpayment  Inst,
-                                    a.totalamount
+                                    TIMESTAMPDIFF(DAY, a.date, ?) ,
+                                    a.downpayment ,
+                                    a.totalamount,
+                                    NULL,
+                                    a.currency
                                     FROM horses h 
                                     INNER JOIN agreementhorses ah
                                     ON h.id = ah.horseid
@@ -1860,60 +2006,73 @@ class Payables(QDialog):
                 qry.exec()
                 if qry.lastError().type() != 0:
                     raise DataError("getHorses -Downpayment", qry.lastError().text())
+            if self.comboCurrency.currentIndex() == -1:
+                self.getCurrency()
             qryDisplay = QSqlQuery(self.tempDb)
-            qryDisplay.exec("""SELECT id, horse, agrid, dos,
-                 months, installment, totalamount
+            qryDisplay.prepare("""SELECT id, horse, agrid, dos,
+                 months, installment, totalamount, payableid, currency
                                    FROM billablehorses 
                                    WHERE NOT billed
+                                   AND currency = ?
                                    ORDER BY agrid, horse""")
+            qryDisplay.addBindValue(QVariant(self.comboCurrency.currentIndex()))
+            qryDisplay.exec()
             qryBilled = QSqlQuery(self.tempDb)
-            qryBilled.exec("""SELECT id, horse, description, amount, payableid FROM billed""")
+            qryBilled.exec("""SELECT id, horse, description, amount, payableid, currency FROM billed""")
             return qryDisplay, qryBilled
-
         except DataError as err:
             print(err.source, err.message)
 
     def createTemporaryTables(self):
         try:
             qry = QSqlQuery(self.tempDb)
-            qry.exec("""CREATE TEMPORARY TABLE IF NOT EXISTS billablehorses (
-                id TINYINT(5) NOT NULL,
-                horse VARCHAR(45) NOT NULL,
-                agrid TINYINT(5) NOT NULL,
-                dos DATE ,
-                months SMALLINT(5) ,
-                installment DECIMAL(6,2) NOT NULL,
-                totalamount DECIMAL(7,2) NOT NULL,
-                billed TINYINT(1) NOT NULL DEFAULT FALSE,
-                payableid SMALLINT(5) DEFAULT NULL,
-                PRIMARY KEY (id))""")
+            qry.exec("CALL payables_createtemporarytables ({})".format(self.mode))
             if qry.lastError().type() != 0:
-                raise DataError("createTemporaryTable -billablehorses", qry.lastError().text())
-            qry.clear()
-            qry.exec("""CREATE TEMPORARY TABLE IF NOT EXISTS billed 
-                (id TINYINT(5) NOT NULL, 
-                horse VARCHAR(45) NOT NULL,
-                description VARCHAR(100) NOT NULL, 
-                amount DECIMAL(7,2) NOT NULL,
-                payableid SMALLINT(5) DEFAULT NULL,
-                PRIMARY KEY (id))""")
-            if qry.lastError().type() != 0:
-                raise DataError("createTemporaryTable -billed", qry.lastError().text())
-            qry.clear()
-            if self.mode == OPEN_EDIT:
-                qry.exec("""CREATE TEMPORARY TABLE IF NOT EXISTS edittable 
-                (id TINYINT(5) NOT NULL, 
-                horse VARCHAR(45) NOT NULL,
-                description VARCHAR(100) NOT NULL, 
-                amount DECIMAL(7,2) NOT NULL,
-                payableid SMALLINT(5) DEFAULT NULL,
-                actioninout TINYINT(1) DEFAULT NULL,
-                PRIMARY KEY (id))""")
-                if qry.lastError().type() != 0:
-                    raise DataError("createTemporaryTable -edittable", qry.lastError().text())
-
+                raise DataError("createTemporaryTable -edittable", qry.lastError().text())
+            if qry.first():
+                raise DataError("createTemporaryTable -edittable", qry.value(0))
         except DataError as err:
             print(err.source, err.message)
+
+            # qry.exec("""CREATE TEMPORARY TABLE IF NOT EXISTS billablehorses (
+            #     id TINYINT(5) UNSIGNED NOT NULL,
+            #     horse VARCHAR(45) NOT NULL,
+            #     agrid TINYINT(5) NOT NULL,
+            #     dos DATE NULL,
+            #     months SMALLINT(5) NOT NULL,
+            #     installment DECIMAL(10,2) NOT NULL DEFAULT 0,
+            #     totalamount DECIMAL(10,2) NOT NULL DEFAULT 0,
+            #     billed TINYINT(1) NOT NULL DEFAULT 0,
+            #     payableid SMALLINT(5) DEFAULT NULL,
+            #     currency SMALLINT(1) NOT NULL,
+            #     PRIMARY KEY (id))""")
+            # if qry.lastError().type() != 0:
+            #     raise DataError("createTemporaryTable -billablehorses", qry.lastError().text())
+            # qry.clear()
+            # qry.exec("""CREATE TEMPORARY TABLE IF NOT EXISTS billed
+            #     (id TINYINT(5) NOT NULL,
+            #     horse VARCHAR(45) NOT NULL,
+            #     description VARCHAR(100) NOT NULL,
+            #     amount DECIMAL(7,2) NOT NULL,
+            #     payableid SMALLINT(5) DEFAULT NULL,
+            #     currency SMALLINT(1) NOT NULL,
+            #     PRIMARY KEY (id))""")
+            # if qry.lastError().type() != 0:
+            #     raise DataError("createTemporaryTable -billed", qry.lastError().text())
+            # qry.clear()
+            # if self.mode == OPEN_EDIT:
+            #     qry.exec("""CREATE TEMPORARY TABLE IF NOT EXISTS edittable
+            #     (id TINYINT(5) NOT NULL,
+            #     horse VARCHAR(45) NOT NULL,
+            #     description VARCHAR(100) NOT NULL,
+            #     amount DECIMAL(7,2) NOT NULL,
+            #     payableid SMALLINT(5) DEFAULT NULL,
+            #     actioninout TINYINT(1) DEFAULT NULL,
+            #     PRIMARY KEY (id))""")
+        #          if qry.lastError().type() != 0:
+        #           raise DataError("createTemporaryTable -edittable", qry.lastError().text())
+        # except DataError as err:
+        #     print(err.source, err.message)
 
     @pyqtSlot()
     def resetWidget(self):
@@ -1952,30 +2111,31 @@ class Payables(QDialog):
                 qry = self.tableCheck.model().query()
                 row = self.tableCheck.currentIndex().row()
                 qry.seek(row)
-                qryInsert.exec("CALL payables_include_exclude_charges({},'{}','{}',{},{},{},{})".format(
+                qryInsert.exec("CALL payables_include_exclude_charges({},'{}','{}',{},{},{},{},{})".format(
                     qry.value(0),
                     (qry.value(1)),
                     "Board from {} to {}".format(self.dateFrom.date().toString("yyyy-MM-dd"),
                                                  self.dateTo.date().toString("yyyy-MM-dd"))\
-                    if self.comboInvoiceType.getHiddenData(0) == PAYABLES_TYPE_BOARD else \
-                    "Downpayment",
+                    if self.comboInvoiceType.getHiddenData(0) == PAYABLES_TYPE_BOARD else "Downpayment",
                 qry.value(5),
-                'NULL' if qry.value(7) is None else qry.value(7),
+                'NULL' if qry.value(7) == 0  or qry.value(7) == b'\x00' else qry.value(7),
                 self.mode,
-                True))
+                True,
+                qry.value(8)))
 
-            elif self.sender().objectName() == "tableBilled":
+            else :
                 qry = self.tableBilled.model().query()
                 row = self.tableBilled.currentIndex().row()
                 qry.seek(row)
-                qryInsert.exec("CALL payables_include_exclude_charges({}, {}, {}, {}, {}, {}, {})".format(
+                qryInsert.exec("CALL payables_include_exclude_charges({}, {}, {}, {}, {}, {}, {}, {})".format(
                     qry.value(0),
                     'NULL',
                     'NULL',
                     'NULL',
                     'NULL',
                     self.mode,
-                    False))
+                    False,
+                    'NULL'))
             if qryInsert.lastError().type() != 0:
                 raise DataError("includeHorses -Insert", qryInsert.lastError().text())
             if qryInsert.first():
@@ -2008,7 +2168,7 @@ class Payables(QDialog):
                 raise DataError("refreshTables -billed", qryBilled.lastError().text())
             self.tableBilled.model().setQuery(qryBilled)
             qryCheck.exec(("""SELECT id, horse, agrid, dos, months, 
-            installment, totalamount, payableid
+            installment, totalamount, payableid, currency
                 FROM billablehorses 
                 WHERE NOT billed
                 ORDER BY agrid, horse"""))

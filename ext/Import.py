@@ -1,6 +1,3 @@
-import sys
-import os
-
 from PyQt5.QtWidgets import (QGroupBox, QDialog, QHBoxLayout, QVBoxLayout,QFormLayout, QLabel, QProgressDialog,
                              QSpinBox, QApplication,
                              QPushButton, QCheckBox, QDateEdit, QMessageBox, QFrame, QToolButton, QGridLayout)
@@ -36,9 +33,8 @@ class ImportHorses(QDialog):
         self.accessName = None
         self.adb = self.openAccessDb()
         self.setModal(True)
-        self.setUi()
         self.setWindowTitle("Import Horse Data from {}".format(self.accessName[:self.accessName.index('.')]))
-
+        self.setUi()
     def setUi(self):
         self.setMinimumSize(1450, 700)
         groupSex = QGroupBox()
