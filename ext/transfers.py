@@ -64,7 +64,7 @@ class Transfer(QDialog):
         self.dateDate.setDate(QDate.currentDate())
         self.dateDate.setCalendarPopup(True)
         self.dateDate.setMinimumWidth(120)
-        self.dateDate.setMinimumDate(_date)
+        #self.dateDate.setMinimumDate(_date)
         #self.dateDate.dateChanged.connect(self.setOldDate)
         self.dateDate.dateChanged.connect(self.enableSave)
 
@@ -82,7 +82,7 @@ class Transfer(QDialog):
         lblFrom = QLabel('From Location')
         self.comboFrom = FocusCombo()
         self.comboFrom.setObjectName('comboFrom')
-        self.comboFrom.model().setQuery(self.locationsLook(2))
+        self.comboFrom.model().setQuery(self.locationsLook(2)) #from locations (2)
         self.comboFrom.setModelColumn(1)
         self.comboFrom.activated.connect(self.enableSave)
         self.comboFrom.activated.connect(self.enableTransfers)
@@ -97,7 +97,7 @@ class Transfer(QDialog):
 
         lblTo = QLabel('To Location')
         self.comboTo = FocusCombo()
-        self.comboTo.model().setQuery(self.locationsLook(3))
+        self.comboTo.model().setQuery(self.comboFrom.model().query())
         self.comboTo.setModelColumn(1)
         self.comboTo.setCurrentIndex(-1)
         self.comboTo.setMinimumWidth(250)
@@ -191,11 +191,11 @@ class Transfer(QDialog):
             self.toDate.setMinimumDate(self.minimumDate)
 
             self.comboLookFrom = FocusCombo()
-            self.comboLookFrom.model().setQuery(self.locationsLook(0))
+            self.comboLookFrom.model().setQuery(self.locationsLook(0)) #from loaction (0)
             self.comboLookFrom.setModelColumn(1)
 
             self.comboLookTo = FocusCombo()
-            self.comboLookTo.model().setQuery(self.locationsLook(1))
+            self.comboLookTo.model().setQuery(self.locationsLook(1)) #toLocation (1)
             self.comboLookTo.setModelColumn(1)
 
             optLayout = QVBoxLayout()
@@ -406,7 +406,6 @@ class Transfer(QDialog):
     @pyqtSlot()
     def locationsLook(self, option):
         try:
-
             qry = QSqlQuery(self.db)
             qry.exec("CALL transfer_looklocations({}, {}, {})".format(self.supplierId, option,
                                                         'NULL' if option < 3 else self.comboFrom.getHiddenData(0)))
@@ -459,7 +458,7 @@ class Transfer(QDialog):
             qry = QSqlQuery(self.db)
             qry.exec("CALL transfer_minimumdate({})".format(self.supplierId))
             if qry.lastError().type() != 0:
-                raise DataError('getMinimumDate', qry.lastError().text())
+                raise DataError('Teansfer: getMinimumDate', qry.lastError().text())
             if qry.first():
                 return qry.value(0), qry.value(1)
         except DataError as err:
@@ -551,8 +550,9 @@ class Transfer(QDialog):
     def loadToLocations(self):
         try:
             self.comboTo.model().setQuery(self.locationsLook(3))
+            print(self.comboTo.model().query().size())
         except Exception as err:
-            print("loadToLocations", err.args)
+            print("Transfer: loadToLocations", err.args)
 
     @pyqtSlot()
     def enableSave(self):
@@ -580,13 +580,11 @@ class Transfer(QDialog):
     @pyqtSlot()
     def loadFromHorses(self):
         try:
-            transferRecord =  'NULL' if self.mode == OPEN_NEW  or self.transferRecord is None \
-                else self.transferRecord.value(0)
             qry = QSqlQuery(self.tempDb)
-            qry.exec("CALL transfer_loadfromhorses({}, {}, {})".format(self.supplierId,
-                    'NULL' if self.comboFrom.currentIndex() == -1 else self.comboFrom.getHiddenData(0),transferRecord))
+            qry.exec("CALL transfer_loadfromhorses({}, {})".format(self.supplierId,
+                    'NULL' if self.comboFrom.currentIndex() == -1 else self.comboFrom.getHiddenData(0)))
             if qry.lastError().type() != 0:
-                raise DataError('loadFromHorses', qry.lastError().text())
+                raise DataError('Transfer: loadFromHorses', qry.lastError().text())
             if self.isVisible():
                 self.updateTransferTables()
                 return
@@ -740,7 +738,6 @@ class Transfer(QDialog):
                 'NULL' if self.oldDate is None else "'" + self.oldDate.toString("yyyy-MM-dd") + "'"))
             if qry.lastError().type() != 0:
                 raise DataError()
-
             if qry.first():
                 raise DataError("saveAndClose", qry.value(0))
             self.closeForm()

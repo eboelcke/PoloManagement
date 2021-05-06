@@ -800,7 +800,7 @@ class ShowHorses(QDialog):
         return qry
 
 class StartHorse(QDialog):
-    """The purpose od this class is to start horses alreadiy asigned
+    """The purpose od this class is to start horses alreadiy assigned
     to a particular agreement. The table shows unstarted horses.
      Once the horse is started it'sn not showing in the table any longer.
      Most of the fields in the for are informative. the only field to set
@@ -2518,6 +2518,7 @@ class Reject(QDialog):
         self.pushSave.setEnabled(False)
         self.setWindowTitle("Rejection Registry") if self.agreementId else self.setWindowTitle(
             "Unassigned Horses Rejection Registry")
+
     def enableSave(self):
 
         if self.isVisible():
@@ -2707,7 +2708,8 @@ class Reject(QDialog):
                 if self.mode is None:
                     """Updates the agreementhorses table"""
                     sql_agreementhorses = """ UPDATE agreementhorses
-                                            SET billable = False 
+                                            SET billable = False,
+                                            active = False 
                                             WHERE id = %s"""
                     cur.execute(sql_agreementhorses, (agreementHorseId,))
                     if self.comboType.currentText() != REJECTION_TYPE_TRANSITORY:

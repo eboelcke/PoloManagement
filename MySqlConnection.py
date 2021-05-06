@@ -25,7 +25,7 @@ class MyConnectionDialog(QDialog, Ui_Dialog):
         super(MyConnectionDialog, self).__init__()
         self.setupUi(self)
 
-        self.connector = MySQL_Connector.MysqlConnection('config.ini')
+        self.connector = MySQL_Connector.MysqlConnection('ext/config.ini')
         self.db = self.connector.read_db_config()[1]
         try:
             self.line_edit_host.setText(self.db['host'])

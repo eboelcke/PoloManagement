@@ -215,7 +215,7 @@ class ReceiveBroken(QDialog):
         otherwise as the agreement signing date."""
         try:
             qry = QSqlQuery(self.db)
-            qry.exec("CALL system_minimumdate({})".format(self.agreementId))
+            qry.exec("CALL receivebroken_minimumdate({})".format(self.agreementId))
             if qry.lastError().type() != 0:
                 raise DataError("getLastBoardDate", qry.lastError().text())
             if qry.first():

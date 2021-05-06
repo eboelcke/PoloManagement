@@ -1,5 +1,0 @@
-<RCC>
-  <qresource prefix="Configuration">
-    <file>ext/config.ini</file>
-  </qresource>
-</RCC>

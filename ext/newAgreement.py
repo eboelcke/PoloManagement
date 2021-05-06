@@ -7,11 +7,10 @@ from PyQt5.QtCore import Qt, QDate, QEvent, pyqtSlot, QVariant
 from PyQt5.QtGui import  QStandardItem, QDoubleValidator, QIntValidator, QMouseEvent
 from PyQt5.QtSql import QSqlDatabase, QSqlQuery,QSqlError, QSqlQueryModel
 from ext.socketclient import  RequestHandler
-#from ext.SpinFocus import FocusSpin
 from ext.ListPicker import PickerWidget
 from ext.Contacts import Contacts
-from ext import APM
-from ext.APM import FocusSpin, FocusCombo
+from ext.PriceIndex import CostIndex
+from ext.APM import FocusSpin, FocusCombo, INDEX_NEW, OPEN_EDIT_ONE
 from ext.Settings import SettingsDialog
 
 
@@ -49,6 +48,8 @@ class Agreement(QDialog):
         self.agreementType = 0
         self.filename = None
         self.setWindowTitle("New Play & Sale Agreement")
+        self.costIndex = []
+        self.costIndexDetail = []
         self.setUi()
 
     def setUi(self):
@@ -86,7 +87,7 @@ class Agreement(QDialog):
         self.spinInstallments = QSpinBox()
         self.spinInstallments.setRange(0, 24)
         self.spinInstallments.setMaximumWidth(50)
-        self.spinInstallments.setEnabled(False)
+        self.spinInstallments.setEnabled(True)
 
         self.checkUpdatable = QCheckBox("Updatable")
         self.checkUpdatable.setChecked(False)
@@ -106,6 +107,7 @@ class Agreement(QDialog):
         self.lineBaseIndex.setEnabled(False)
         self.lineBaseIndex.setMaximumWidth(100)
         self.lineBaseIndex.setAlignment(Qt.AlignRight)
+        self.lineBaseIndex.textChanged.connect(self.setBaseIndex)
 
         self.spinMinimum = QSpinBox()
         self.spinMinimum.setValue(0)
@@ -117,14 +119,14 @@ class Agreement(QDialog):
         self.checkBreaking.setTristate(False)
         self.checkBreaking.stateChanged.connect(self.toggleBreaking)
 
-        self.comboSupplier = APM.FocusCombo(self)
+        self.comboSupplier = FocusCombo(self)
         self.comboSupplier.setMaximumSize(220,30)
         self.comboSupplier.setEditable(True)
         self.comboSupplier.activated.connect(self.supplierChange)
         self.comboSupplier.focusLost.connect(self.supplierFocusLost)
         self.comboSupplier.doubleClicked.connect(self.editContact)
 
-        self.comboResponsible = APM.FocusCombo()
+        self.comboResponsible = FocusCombo()
         self.comboResponsible.setEditable(True)
         self.comboResponsible.setMaximumSize(200, 25)
         self.comboResponsible.setMinimumSize(200, 25)
@@ -144,6 +146,12 @@ class Agreement(QDialog):
         btnNewContact = QPushButton("New Contact")
         btnNewContact.setMaximumSize(100, 30)
         btnNewContact.clicked.connect(self.newContact)
+
+        self.btnIndex = QPushButton('Index')
+        self.btnIndex.setMaximumSize(70, 30)
+        self.btnIndex.clicked.connect(self.getIndex)
+        self.btnIndex.hide()
+
 
         self.radioAtEnd = QRadioButton("On Completion")
         self.radioAtEnd.setChecked(False)
@@ -319,13 +327,12 @@ class Agreement(QDialog):
         groupBasicLayout.addWidget(self.lineAgreement,0,1,1,-1)
         groupBasicLayout.addWidget(lblDate,1,0)
         groupBasicLayout.addWidget(self.dateEdit,1,1)
-        #groupBasicLayout.addWidget(self.checkBreaking,1,2)
         groupBasicLayout.addWidget(lblType,1,2)
         groupBasicLayout.addWidget(self.comboAgreementType,1,3)
         groupBasicLayout.addWidget(lblCurrency, 1,4)
         groupBasicLayout.addWidget(self.comboCurrency,1,5)
         groupBasicLayout.addWidget(self.checkUpdatable,2,4)
-        #groupBasicLayout.addLayout(agreementOptionLayout,1,3)
+        groupBasicLayout.addWidget(self.btnIndex,2,5)
         groupBasicLayout.addWidget(lblSupplier,2,0)
         groupBasicLayout.addWidget(self.comboSupplier,2,1)
         groupBasicLayout.addWidget(lblResponsible,2,2)
@@ -379,7 +386,8 @@ class Agreement(QDialog):
         btnLayout.addWidget(btnNewContact)
         btnLayout.addSpacing(800)
         btnLayout.addWidget(btnClose)
-        btnLayout.addWidget((self.btnOk))
+        btnLayout.addWidget(self.btnOk)
+        #btnLayout.addWidget(self.btnIndex)
 
         amountLayout = QFormLayout()
         amountLayout.addRow(lblAmount, self.lineAmount)
@@ -415,10 +423,7 @@ class Agreement(QDialog):
         notesLayout.addWidget(self.textNotes)
 
         bottonLayout = QHBoxLayout()
-        #bottonLayout.addSpacing(100)
         bottonLayout.addWidget(self.picker)
-        #bottonLayout.addLayout(notesLayout)
-        #bottonLayout.addSpacing(100)
 
         vLayout = QVBoxLayout()
         vLayout.addLayout(basicLayout)
@@ -435,15 +440,34 @@ class Agreement(QDialog):
         self.toggleBreaking()
 
     @pyqtSlot()
+    def getIndex(self):
+        try:
+            supplierId = self.comboSupplier.getHiddenData(0)
+            costIndex = CostIndex(self.db, self.dateEdit.date(), supplierId,
+                                  supplierName=self.comboSupplier.currentText(),
+                                  mode=INDEX_NEW, parent=self)
+            costIndex.show()
+            costIndex.exec()
+        except DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print(type(err), err.args)
+
+    @pyqtSlot()
     def enableIndex(self):
         self.lineBaseIndex.setEnabled(self.checkUpdatable.checkState())
         self.lblBaseIndex.setVisible(self.checkUpdatable.checkState())
+        self.btnIndex.setVisible(self.checkUpdatable.isChecked())
+        if self.checkUpdatable.isChecked():
+            self.okToSave.append(None)
+        else:
+            self.resetOkToSave()
+            #self.okToSave.pop()
 
     @pyqtSlot()
     def setUpdatable(self):
         self.checkUpdatable.setVisible(self.comboCurrency.currentIndex())
         self.lineBaseIndex.setVisible(self.comboCurrency.currentIndex())
-        #self.lblBaseIndex.setVisible(self.comboCurrency.currentIndex())
 
     @pyqtSlot(int)
     def getAgreementType(self, int):
@@ -455,7 +479,8 @@ class Agreement(QDialog):
     def resetOkToSave(self):
         self.okToSave = [None,
                          QDate.currentDate(), None, None, None]
-        self.lineAmount.setText('0.00')
+        self.lineAmount.clear()
+        self.lineBaseIndex.clear()
 
     @pyqtSlot()
     def sendSupplier(self):
@@ -471,7 +496,7 @@ class Agreement(QDialog):
             self.spinSaleFinalPercent.setValue(int)
 
 
-    @pyqtSlot(APM.FocusCombo)
+    @pyqtSlot(FocusCombo)
     def supplierFocusLost(self, combo):
         try:
             self.setFocusPolicy(Qt.NoFocus)
@@ -498,7 +523,7 @@ class Agreement(QDialog):
         finally:
             self.setFocusPolicy(Qt.StrongFocus)
 
-    @pyqtSlot(APM.FocusCombo)
+    @pyqtSlot(FocusCombo)
     def responsibleFocusLost(self, combo):
         try:
             self.setFocusPolicy(Qt.NoFocus)
@@ -604,8 +629,8 @@ class Agreement(QDialog):
                 self.qryPlayer.exec()
                 self.qrybreaker.exec()
                 self.qryresponsible.exec()
-            except APM.DataError as err:
-                raise APM.DataError(err.source, err.message)
+            except DataError as err:
+                raise DataError(err.source, err.message)
             except Exception as err:
                 print(type(err).__name__)
 
@@ -654,6 +679,11 @@ class Agreement(QDialog):
         self.spinSaleBasePercent.setFocus()
 
     @pyqtSlot()
+    def setBaseIndex(self):
+        self.okToSave[5] = self.lineBaseIndex.text()
+        self.okSaving()
+
+    @pyqtSlot()
     def saleFirstToChanged(self):
         if float(self.lineSaleFirstTo.text())> 0:
             self.lineSaleSecondFrom.setText(str(float(self.lineSaleFirstTo.text()) + 1))
@@ -661,7 +691,7 @@ class Agreement(QDialog):
             self.lineSaleFinalAmount.setText(self.lineSaleSecondFrom.text())
             self.lineSaleSecondTo.setEnabled(True)
             self.spinSaleSecondPercent.setEnabled(True)
-            #self.spinSaleFirstPercent.setFocus()
+            self.spinSaleFirstPercent.setFocus()
             if float(self.lineSaleFirstTo.text()) < float(self.lineSaleFirstFrom.text()):
                 self.warningMessage("Data Error", "The upper limit must be more than {}". format(
                         self.lineSaleFirstFrom.text()))
@@ -719,7 +749,7 @@ class Agreement(QDialog):
     def editContact(self):
         print('edit contact fired')
         try:
-            c = Contacts(self.db,self.comboSupplier.currentText(), APM.OPEN_EDIT_ONE, self.supplierId,parent=self)
+            c = Contacts(self.db,self.comboSupplier.currentText(), OPEN_EDIT_ONE, self.supplierId,parent=self)
             c.show()
             c.exec()
         except Exception as err:
@@ -751,6 +781,7 @@ class Agreement(QDialog):
         try:
             self.agreementTitle[0] = self.comboSupplier.currentText()
             self.setAgreementTitle()
+            self.supplierId = self.comboSupplier.getHiddenData(0)
             self.okToSave[2] = self.comboSupplier.getHiddenData(0)
             self.okSaving()
             self.picker.loadBaseTable()
@@ -799,14 +830,14 @@ class Agreement(QDialog):
 
             if self.agreementType in [0,1]: #isChecked():
                 if self.qrybreaker.size() < 1:
-                    raise APM.DataError("Horse Breakers", "The Horse Breaker list is empty!")
+                    raise DataError("Horse Breakers", "The Horse Breaker list is empty!")
                 self.modelSupplier.setQuery(self.qrybreaker)
                 self.groupSale.setChecked(False) if self.agreementType == 0 else self.groupSale.setChecked(True)
                 self.spinMinimum.setEnabled(True)
                 self.radioFee.setChecked(True)
             else:
                 if self.qryPlayer.size() < 1:
-                    raise APM.DataError("Polo Player", "The Polo Player -Play&Sale- list is empty!")
+                    raise DataError("Polo Player", "The Polo Player -Play&Sale- list is empty!")
                 self.modelSupplier.setQuery(self.qryPlayer)
                 #self.agreementTitle[1] = "- Play & Sale Agreement - "
                 self.groupSale.setChecked(True)
@@ -820,8 +851,8 @@ class Agreement(QDialog):
             self.setAgreementTitle()
             self.picker.breaking = True if self.agreementType in [0,1] else False
 
-        except APM.DataError as err:
-            raise APM.DataError(err.source, err.message)
+        except DataError as err:
+            raise DataError(err.source, err.message)
         except Exception as err:
             print(err)
         self.supplierChange()
@@ -856,6 +887,14 @@ class Agreement(QDialog):
         return res
 
     def saveNew(self):
+        if self.checkUpdatable.isChecked() and self.costIndex is None:
+            ans = QMessageBox.warning(self, "Base Cost Index missing", "This is an updatable agreement and the"
+                                                                       " base cost index is missing. Do you want to "
+                                                                       "set it up now? Eventually you might set it up"
+                                                                       "later before running the first invoices",
+                                      QMessageBox.Yes|QMessageBox.No)
+            if ans == QMessageBox.Yes:
+                self.getIndex()
         rewrite = False
         try:
             while True:
@@ -892,7 +931,12 @@ class Agreement(QDialog):
                                                              rewrite,
                                                              self.picker.agreementHorses,
                                                              farmData,
-                                                             self.comboCurrency.getHiddenData(0)])
+                                                             self.comboCurrency.getHiddenData(0),
+                                                             self.checkUpdatable.isChecked(),
+                                                             self.lineBaseIndex.text() if self.lineBaseIndex.text() \
+                                                                                                else  None,
+                                                             self.costIndex,
+                                                             self.costIndexDetail])
                 if not answer[0]:
                     msgBox = QMessageBox()
                     updateButton = QPushButton("UPDATE")

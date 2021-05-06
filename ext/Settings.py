@@ -3,13 +3,15 @@ import os
 
 from PyQt5.QtWidgets import (QGroupBox, QDialog, QHBoxLayout, QVBoxLayout,QFormLayout, QLabel, QLineEdit, QComboBox,
                              QPushButton, QApplication, QFileDialog, QMessageBox, QFrame, QPlainTextEdit)
-from PyQt5.QtCore import Qt, QSettings, QCoreApplication, pyqtSlot, QVariant
+from PyQt5.QtCore import Qt, QSettings, QCoreApplication, pyqtSlot, QVariant,QRegExp
 from PyQt5.QtSql import QSqlDatabase, QSqlQuery, QSqlQueryModel
+from PyQt5.QtGui import QRegExpValidator, QRegularExpressionValidator
 from configparser import ConfigParser
 from ext.socketclient import RequestHandler
 from ext.Contacts import Location
-from ext.APM import DataError, Cdatabase, FocusPlainTextEdit, CreateDatabase, FocusCombo
+from ext.APM import DataError, LineEditHover,  FocusPlainTextEdit, CreateDatabase, FocusCombo, EMAILREGEXP
 import resources
+import poloresurce
 
 
 
@@ -35,7 +37,6 @@ class SettingsDialog(QDialog):
         self.showComboLocation()
         self.isNameEditable = False
         self.setModal(True)
-
 
     def setUI(self):
         self.setWindowTitle("Settings")
@@ -118,7 +119,6 @@ class SettingsDialog(QDialog):
         self.comboLocation.focusLost.connect(self.locationFocusLost)
         self.comboLocation.setVisible(False)
 
-
         lblFarmAddress = QLabel("Address")
         self.textFarmAddress = FocusPlainTextEdit()
         self.textFarmAddress.focusOut.connect(self.dirtyFarm)
@@ -170,6 +170,22 @@ class SettingsDialog(QDialog):
         self.btnOk.setEnabled(False)
         self.btnOk.clicked.connect(self.saveAndClose)
 
+        rx = EMAILREGEXP
+        lblEMail = QLabel("EMail Settings")
+        lblEMailAddress= QLabel("EMail Address")
+        self.lineEMailAddress = LineEditHover()
+        self.lineEMailAddress.setRegExpValidator(rx)
+
+        lblEMailPassword = QLabel("EMail Password")
+        self.lineEMailPassword = QLineEdit()
+        self.lineEMailPassword.setEchoMode(QLineEdit.PasswordEchoOnEdit)
+        self.lineEMailPassword.setMaximumWidth(210)
+
+        lblOauth2 = QLabel('Oauth2 token"')
+        self.lineOauth2 = QLineEdit()
+        self.lineOauth2.setMaximumWidth(210)
+        self.lineOauth2.setObjectName("token")
+
         self.btnContinue = QPushButton("Continue")
         self.btnContinue.setEnabled(False)
         self.btnContinue.clicked.connect(self.accept)
@@ -197,6 +213,13 @@ class SettingsDialog(QDialog):
         btnDir.setObjectName("AgreementPath")
         btnDir.clicked.connect(self.lookForPath)
 
+        btnOauth2 = QPushButton("...")
+        btnOauth2 = QPushButton("...")
+        btnOauth2.setMaximumWidth(30)
+        btnOauth2.setMaximumHeight(28)
+        btnOauth2.setObjectName("tokenFile")
+        btnOauth2.clicked.connect(self.lookForFile)
+
         lfrmLayout = QFormLayout()
         rfrmLayout = QFormLayout()
         testHLayout = QHBoxLayout()
@@ -221,6 +244,10 @@ class SettingsDialog(QDialog):
         accessNameLayout = QHBoxLayout()
         accessNameLayout.addWidget(self.lineAccessName)
         accessNameLayout.addWidget(btnAccessFile)
+
+        emailOauth2Layout = QHBoxLayout()
+        emailOauth2Layout.addWidget(self.lineOauth2)
+        emailOauth2Layout.addWidget(btnOauth2)
 
         iconsFileLayout = QHBoxLayout()
         iconsFileLayout.addWidget(self.lineIconsDir)
@@ -253,6 +280,11 @@ class SettingsDialog(QDialog):
         lfrmLayout.addRow(lblAccessPath,accessHLayout)
         lfrmLayout.addRow(lblAccessName, accessNameLayout)
         lfrmLayout.addRow(lblAccessConnect, accessTestLayout)
+
+        lfrmLayout.addRow(lblEMail)
+        lfrmLayout.addRow(lblEMailAddress, self.lineEMailAddress)
+        lfrmLayout.addRow(lblEMailPassword, self.lineEMailPassword)
+        lfrmLayout.addRow(lblOauth2, emailOauth2Layout)
 
         rfrmLayout.addRow(lblOwnerTitle)
         rfrmLayout.addRow(lblOwner, self.lineOwner)
@@ -322,7 +354,6 @@ class SettingsDialog(QDialog):
     @pyqtSlot()
     def upgradeLocationAddress(self):
         try:
-            #self.textFarmAddress.setPlainText(self.comboLocation.getHiddenData(2))
             self.textFarmAddress.setPlainText(self.comboLocation.model().query().value(2))
 
         except Exception as err:
@@ -404,39 +435,33 @@ class SettingsDialog(QDialog):
             self.lineDatabaseName.setText(settings.value("mysql/Database"))
             self.lineDatabaseUser.setText(settings.value("mysql/user"))
             self.lineDatabasePwd.setText(settings.value("mysql/password"))
-        except TypeError:
-            pass
-        try:
+
             self.lineOrganizationName.setText(settings.value("organization/companyName"))
             self.lineSoftwareName.setText(settings.value("organization/softwareTitle"))
-        except TypeError:
-            pass
-        try:
+
             self.lineAgreementDir.setText(settings.value("path/Agreements"))
             self.lineIconsDir.setText(settings.value("path/icons"))
-        except TypeError:
-            pass
-        try:
+
             self.lineServerName.setText(settings.value("Server/serverName"))
             self.lineServerPort.setText(settings.value("Server/serverPort"))
             self.address = self.serverAddress
-        except TypeError:
-            pass
-        try:
+
             self.lineOwner.setText(settings.value("owner/ownerName"))
             self.textAddress.setPlainText(settings.value("owner/Address"))
             self.lineFarm.setText(settings.value("owner/FarmName"))
             self.textFarmAddress.setPlainText(settings.value("owner/FarmAddress"))
             if settings.value("owner/locationId"):
                 self.locationId = int(settings.value("owner/locationId"))
-            if not settings.value("owner/contactId") == 'None':
+            if settings.value("owner/contactId"):
                 self.contactId = int(settings.value("owner/contactId"))
-        except TypeError:
-            pass
-        try:
+
             self.comboDriver.setCurrentIndex(int(settings.value("access/driver")))
             self.linePath.setText(settings.value("access/path"))
             self.lineAccessName.setText(settings.value("access/fullpath"))
+
+            self.lineEMailAddress.setText(settings.value("email/address"))
+            self.lineEMailPassword.setText(settings.value("email/password"))
+            self.lineOauth2.setText(settings.value("email/outh2_token"))
         except TypeError as err:
             print(type(err), err.args)
 
@@ -447,6 +472,10 @@ class SettingsDialog(QDialog):
         serverPort = int(sett.value("Server/ServerPort"))
         address = (serverName, serverPort)
         return address
+
+    @property
+    def emailConnectionString(self):
+        return (self.lineEMailAddress.text(), self.lineEMailPassword.text())
 
     @property
     def iconsRelativeDir(self):
@@ -540,7 +569,7 @@ class SettingsDialog(QDialog):
             else:
                 self.linePath.setText(rootDir)
         except Exception as err:
-            print("lookForFile", err.args)
+            print("settings: lookForFile", err.args)
 
     @pyqtSlot()
     def lookForFile(self):
@@ -553,16 +582,21 @@ class SettingsDialog(QDialog):
             elif obj.objectName() == "IconsFile":
                 capt = "Icons Resource File"
                 fileType = "Icons Files (*.qrc, *.png)"
-                baseDir = os.getcwd()
+                baseDir = self.lineIconsDir.text()
+            elif obj.objectName() == "tokenFile":
+                capt = "Gmail Outh2 token File"
+                fileType = "Gmail token Files (*.json)"
+                baseDir = self.lineOauth2.text()
             res = QFileDialog.getOpenFileName(self, caption=capt,directory=baseDir, filter=fileType)
-            #fileName = os.path.basename(res[0])
             fileName = res[0]
             if obj.objectName() == "AccessFile":
                 self.lineAccessName.setText(fileName)
-            else:
-                self.lineIconsDir.setText(os.path.dirname(fileName))
+            elif obj.objectName() == "IconsFile":
+                self.lineIconsDir.setText(fileName)
+            elif obj.objectName() == "tokenFile":
+                self.lineOauth2.setText(fileName)
         except Exception as err:
-            print("lookForFile", err.args)
+            print("settings: lookForFile", err.args)
 
     @pyqtSlot()
     def saveAndClose(self, state=False):
@@ -600,6 +634,10 @@ class SettingsDialog(QDialog):
                 sett.setValue("access/path", self.linePath.text())
                 sett.setValue("access/fullpath",self.lineAccessName.text())
 
+                sett.setValue("email/address", self.lineEMailAddress.text())
+                sett.setValue("email/password", self.lineEMailPassword.text())
+                sett.setValue("email/outh2_token", self.lineOauth2.text())
+
                 if self.ownerDirty:
                     contactId = self.ownerChanged()
                     sett.setValue("owner/contactid", str(contactId) )
@@ -616,7 +654,7 @@ class SettingsDialog(QDialog):
         finally:
             self.done(QDialog.Rejected)
 
-    def read_db_config(self,section='mysql', configfile = 'config.ini'):
+    def read_db_config(self,section='mysql', configfile="config.ini"):
         """ Read database configuration file and return a dictionary object
         :param filename: name of the configuration file
         :param section: section of database configuration
@@ -624,6 +662,8 @@ class SettingsDialog(QDialog):
         """
         # create parser and read ini configuration file
         parser = ConfigParser()
+        if os.getcwd()[-3:] != 'ext':
+            configfile = "ext/" + configfile
         parser.read(configfile)
         conn_string = {}
 
@@ -635,9 +675,9 @@ class SettingsDialog(QDialog):
                     conn_string[item[0]] = item[1]
                 return conn_string
             else:
-                raise Exception('{0} not found in the {1} file'.format(section, self.filename))
+                raise Exception('{0} not found in the {1} file'.format(section, configfile))
         except Exception as err:
-            print(err)
+            print("SettingsDialog: read_db_config", err.args)
             return conn_string
 
     @pyqtSlot()
@@ -646,8 +686,9 @@ class SettingsDialog(QDialog):
         self.lblTestResult.setStyleSheet("QLabel{background-color: yellow; color: black}")
         self.repaint()
         testMessage = "Failed"
-        self.con_string = {'host': self.lineDatabaseHost.text(), 'user': self.lineDatabaseUser.text(),
-                           'database': self.lineDatabaseName.text(), 'password': self.lineDatabasePwd.text()}
+        self.con_string = self.read_db_config()
+        #self.con_string = {'host': self.lineDatabaseHost.text(), 'user': self.lineDatabaseUser.text(),
+        #                   'database': self.lineDatabaseName.text(), 'password': self.lineDatabasePwd.text()}
         try:
             db = QSqlDatabase.addDatabase("QMYSQL3")
             db.setHostName(self.con_string['host'])
@@ -670,7 +711,7 @@ class SettingsDialog(QDialog):
                                                "Database {} doesn't exist. Do you want to create it?".format(
                                                    self.con_string['database'], QMessageBox.Yes|QMessageBox.No))
                         if res == QMessageBox.Yes:
-                            #implement a module to create database open with host, user and password"
+                            #implements a module to create database open with host, user and password"
                             res = CreateDatabase(self.con_string, self)
                             ans = res.create()
                             if ans:

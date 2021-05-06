@@ -5,12 +5,12 @@ from PyQt5.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
 from PyQt5.QtGui import (QTextDocument, QTextCursor, QStandardItemModel, QStandardItem,
                          QTextTableFormat, QTextLength, QIcon, QDoubleValidator,
                          QTextTableCellFormat, QTextCharFormat, QFont, QTextOption, QColor,
-                         QFocusEvent, QMouseEvent, QTextFrameFormat, QTextFrame)
+                         QFocusEvent, QMouseEvent, QTextFrameFormat, QTextFrame, QRegExpValidator)
 from PyQt5.QtWidgets import (QTableView, QMessageBox, QHeaderView, QDateEdit, QProgressDialog, QToolButton,
                              QLineEdit, QSpinBox, QWidget, QHBoxLayout, QVBoxLayout, QComboBox, QApplication, QLabel,
                              QPlainTextEdit, QAbstractItemView, QDialog, QTextEdit)
 from PyQt5.QtCore import (Qt, QVariant, pyqtSignal, pyqtSlot, QEvent, QObject, QTimer,QRunnable,
-                          QMetaObject, QThread, Q_ARG, Q_RETURN_ARG, QDate)
+                          QMetaObject, QThread, Q_ARG, Q_RETURN_ARG, QDate, QRegExp)
 from PyQt5.QtSql import QSqlQueryModel, QSqlDatabase, QSqlQuery
 import sys, traceback, time
 
@@ -28,11 +28,13 @@ AGREEMENT_TYPE_PLAY = 2
 AGREEMENT_TYPE_OVER_BASE = 3
 AGREEMENT_TYPE_OVER_EXPENSES = 4
 
+OPEN_FIRST = 6
 OPEN_NEW = 7
 OPEN_EDIT = 8
 OPEN_EDIT_ONE = 9
 OPEN_FILE = 10
 OPEN_DELETE = 14
+
 DELETE_FILE = 11
 COPY_FILE = 12
 RENAME_FILE = 13
@@ -96,9 +98,9 @@ PAYMENT_MODALITY_MONTHLY_ONSITEONLY = 2
 TEMP_RECORD_IN = 0
 TEMP_RECORD_OUT = 1
 
-PAYMENT_TYPE_CHECK = 0
-PAYMENT_TYPE_TRANSFER = 1
-PAYMENT_TYPE_CASH = 2
+PAYMENT_TYPE_CHECK = 1 # 0 Use to be on last value Changed?
+PAYMENT_TYPE_TRANSFER = 2 # 1
+PAYMENT_TYPE_CASH = 0 #2
 
 PAYMENT_CURRENCY_USA = 0
 PAYMENT_CURRENCY_LOCAL = 1
@@ -131,6 +133,20 @@ BANCO_FRANCES = 6
 
 WHERE_CLAUSE_ONE = 0
 WHERE_CLAUSE_ALL = 1
+
+INDEX_NEW = 0
+INDEX_UPGRADE = 1
+INDEX_EDIT = 2
+INDEX_NEW_PROV = 3
+
+ACCOUNT_INVOICE = 0
+ACCOUNT_PAYMENT = 1
+ACCOUNT_ALL = 3
+ACCOUNT_HORSE_BALANCE = 4
+ACCOUNT_SUPPLIER_BALANCE = 5
+ACCOUNT_AGREEMENT_BALANCE = 6
+
+EMAILREGEXP = QRegExp(r"[a-z0-9_%]+@[a-z0-9%_]{1,10}\.[a-z0-9%_]{1,3}(\.[a-z0-9_%]{1,3})?")
 
 class Error(Exception):
     pass
@@ -171,13 +187,52 @@ class FocusPlainTextEdit(QPlainTextEdit):
         super().__init__(parent)
         self.parent = parent
         self.installEventFilter(self)
-        #self.setFocusPolicy(Qt.StrongFocus)
 
     def eventFilter(self, obj, event):
         if type(obj) is FocusPlainTextEdit:
             if event.type() == QEvent.FocusOut:
                 self.focusOut.emit()
         return super().eventFilter(obj, event)
+
+class LineEditHover(QLineEdit):
+    mouseMove = pyqtSignal(int, int)
+    keyDeleteDown = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_Hover)
+        self.parent = parent
+        self.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if type(obj) is LineEditHover:
+            if event.type() == QEvent.MouseMove:
+                self.mouseMove.emit(event.x(), event.y())
+            if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Delete:
+                self.keyDeleteDown.emit()
+        return super().eventFilter(obj, event)
+
+    def setRegExpValidator(self, rx ):
+        validator = QRegExpValidator(rx, self)
+        self.cursorPositionChanged[int, int].connect(lambda oldPos, newPos: self.checkValidator(newPos,validator))
+        self.editingFinished.connect(lambda : self.checkRegExp(rx))
+
+    @pyqtSlot(int, QRegExpValidator)
+    def checkValidator(self, pos, val):
+        res = val.validate(self.text(), pos)[0]
+        if res == 0:
+            self.setText(self.text()[:-1])
+
+    @pyqtSlot(QRegExp)
+    def checkRegExp(self, rx):
+        if not rx.exactMatch(self.text()) and self.text():
+            if QMessageBox.question(self, "Leave the field",
+            "The string entered is not a valid entry! \n" 
+             "Do you want to clear the field?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
+                self.clear()
+            else:
+                self.setFocus()
+
 
 class CreateDatabase():
     def __init__(self, con_string, parent=None):
@@ -252,14 +307,22 @@ class QSqlAlignColorQueryModel(QSqlQueryModel):
                         value = qry.value(idx.column())
                         if isinstance(value, float) and value < 0:
                             return QVariant(QColor("red"))
-                        return QVariant(self.colorDict[qry.value(self.colorDict['column'])][1])
+                        baseColor = QVariant(self.colorDict[qry.value(self.colorDict['column'])][1])
+                        try:
+                            return QVariant(self.colorDict[qry.value(self.colorDict['modifier'])][1])
+                        except KeyError:
+                            return baseColor
                     except KeyError:
                         return
                 if role == Qt.BackgroundColorRole:
                     try:
                         if isinstance(value, float) and value < 0 :
                             return QVariant(QColor("white"))
-                        return QVariant(self.colorDict[qry.value(self.colorDict['column'])][0])
+                        baseColor = QVariant(self.colorDict[qry.value(self.colorDict['column'])][0])
+                        try:
+                            return QVariant(self.colorDict[qry.value(self.colorDict['modifier'])][0])
+                        except KeyError:
+                            return baseColor
                     except KeyError:
                         return
         except Exception as err:
@@ -286,11 +349,14 @@ class TableViewAndModel(QTableView):
                                      bool QHeaderView,
                                      int colCentered - (1:center; 2 right;0 default leftAlign
                                      int/None printWidth)}
-        size: (height int, width int) Size of the table
+        size: (height int, width int) Size of the table.
+        Includes two signals : currentmove -fired as the selection change on the table ;
+        and currentSelect fires as the Enter key is pressed on a selected row.
 
     """
 
     currentMove = pyqtSignal(int)
+    currentSelect = pyqtSignal(int)
 
     def __init__(self, colDict, colorDict, size, qry=None):
         super().__init__()
@@ -323,7 +389,6 @@ class TableViewAndModel(QTableView):
             self.verticalHeader().setDefaultSectionSize(25)
             self.horizontalHeader().setStyleSheet("QHeaderView { font-size: 8pt;}")
             self.setStyleSheet("TableViewAndModel {font-size: 8pt;}")
-            #self.setMinimumSize(*self.size)
             self.setSelectionBehavior(QAbstractItemView.SelectRows)
             self.setSelectionMode(QAbstractItemView.SingleSelection)
         except DataError as err:
@@ -334,9 +399,12 @@ class TableViewAndModel(QTableView):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Down:
-                self.currentMove.emit(self.currentIndex().row() + 1)
+                self.currentMove.emit(self.currentIndex().row()+1)
             if event.key() == Qt.Key_Up:
-                self.currentMove.emit(self.currentIndex().row() +1)
+                self.currentMove.emit(self.currentIndex().row()-1)
+            if event.key() == 16777220: #Qt.Key_Enter:
+                self.currentSelect.emit(self.currentIndex().row())
+
         return super().eventFilter(obj, event)
 
     @property
@@ -351,7 +419,7 @@ class TableViewAndModel(QTableView):
         self.qry.fist()
         while self.qry.next():
             if self.qry.idx.column(column) == id:
-                return qry.record()
+                return self.qry.record()
 
 class PercentOrAmountLineEdit(QWidget):
     """This custom widget consists on a QLabel; a QLineEdit and a QPushButton.
@@ -596,7 +664,7 @@ class FocusCombo(QComboBox):
     def seekMultipleData(self, dataDict):
         """Function designto get a match on several columns of a QComboBox
             **dataDict is a dictionary od the form {"column int": data}
-            The "column" mus be consisten with the combo Query"""
+            The "column" must be consistent with the combo Query"""
         qry = self.model().query()
         row = -1
         while qry.next():

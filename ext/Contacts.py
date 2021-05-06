@@ -3,15 +3,21 @@ import os
 from PyQt5.QtWidgets import (QDialog, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel, QLineEdit, QPlainTextEdit,
                              QPushButton, QTableView, QMessageBox, QCheckBox, QListView,
                               QMenuBar, QMenu, QAction, QFormLayout, QAbstractItemView)
-from PyQt5.QtCore import Qt, QSettings, pyqtSlot, QVariant, QEvent, QPoint, QModelIndex
-from PyQt5.QtGui import QStandardItemModel, QColor, QMouseEvent
+from PyQt5.QtCore import Qt, pyqtSlot, QVariant, QPoint, QModelIndex, QDate, QRegExp
+from PyQt5.QtGui import QStandardItemModel, QColor, QMouseEvent, QIcon, QRegExpValidator
 from PyQt5.QtSql import QSqlQuery, QSqlQueryModel, QSqlDriver
 from ext.socketclient import RequestHandler
-from ext.Invoices import Invoice, Payables, OtherCharge, Payment
-from ext import APM
+from ext.Invoices import Invoice, Payables, Downpayments, OtherCharge, Payment, EditPayables
+from ext.APM import (DataError, INDEX_UPGRADE, INDEX_EDIT, INDEX_NEW,
+    CONTACT_POLO_PLAYER, CONTACT_BUSTER, CONTACT_BUYER, CONTACT_DEALER, CONTACT_BREAKER, CONTACT_RESPONSIBLE,
+    CONTACT_PLAYER, CONTACT_VETERINARY, ACCOUNT_ALL, ACCOUNT_PAYMENT, ACCOUNT_INVOICE, ACCOUNT_HORSE_BALANCE,
+    OPEN_EDIT_ONE, OPEN_EDIT,OPEN_NEW,
+    PAYABLES_TYPE_BOARD, PAYABLES_TYPE_DOWNPAYMENT, PAYABLES_TYPE_ALL,PAYABLES_TYPE_SALE, PAYABLES_TYPE_OTHER,
+    PAYABLES_TYPE_FULL_BREAK, PAYABLES_TYPE_HALF_BREAK,
+    TableViewAndModel, FocusCombo, FocusPlainTextEdit, Cdatabase, EMAILREGEXP, LineEditHover)
 from ext.transfers import Transfer
-#from ext.CQSqlDatabase import Cdatabase
-from ext.APM import QSqlAlignColorQueryModel, TableViewAndModel, FocusCombo, FocusPlainTextEdit, Cdatabase
+from ext.PriceIndex import CostIndex
+from ext.accountReports import AvailableDocuments
 
 
 class ChooseActiveSupplier(QDialog):
@@ -95,15 +101,17 @@ class ChooseActiveSupplier(QDialog):
             self.parent.supplier = record.value(1)
             self.parent.player = True if record.value(2) == u'\u2714' else False
             self.parent.buster = True if record.value(3) == u'\u2714' else False
-            self.parent.setWindowTitle("Polo Managemet Contact Data from : " + record.value(1))
+            self.parent.setWindowTitle("Polo Managemet Contact Data for :{}".format(record.value(1)))
             self.parent.supplierData()
+            self.getCurrency(record.value(0))
             self.close()
         except Exception as err:
-            print("getSupplier", type(err).__name__, err.args)
+            print("ChooseActiveSupplier: getSupplier", type(err).__name__, err.args)
 
     @pyqtSlot()
     def getSupplier(self):
         try:
+            idx = None
             model = self.table.model()
             row = self.table.currentIndex().row()
             model.query().seek(row)
@@ -112,10 +120,44 @@ class ChooseActiveSupplier(QDialog):
             self.parent.supplier = record.value(1)
             self.parent.player = True if record.value(2) == u'\u2714' else False
             self.parent.buster = True if record.value(3) == u'\u2714' else False
-            self.parent.setWindowTitle("Polo Managemet Contact Data from : " + record.value(1))
+            self.parent.setWindowTitle("Polo Managemet Contact Data for : " + record.value(1))
+            self.getCurrency(record.value(0))
             self.close()
+        except  Exception as err:
+            print("ChooseActiveSupplier: getSupplier", err.args)
+
+    def getCurrency(self, supplierId):
+        try:
+            qry = QSqlQuery(self.db)
+            qry.exec("CALL chooseactivesupplier_getcurrency({})".format(supplierId))
+            if qry.first():
+                if qry.value(0) and qry.value(1):
+                    pop = QMessageBox()
+                    pop.setWindowTitle("Currency")
+                    pop.setWindowIcon(QIcon(":Icons8/Accounts/currency.png"))
+                    pop.setText('There are payables on both currencies!')
+                    pop.setIcon(QMessageBox.Question)
+                    pop.addButton("U$A", QMessageBox.YesRole)
+                    pop.addButton("AR$", QMessageBox.YesRole)
+                    pop.buttonClicked.connect(self.chooseCurrency)
+                    pop.setModal(True)
+                    pop.show()
+                    idx = pop.exec()
+                elif qry.value(0):
+                    idx = 0
+                elif qry.value(1):
+                    idx = 1
+                else:
+                    idx = 0
+            self.parent.comboCurrency.setCurrentIndex(idx)
         except Exception as err:
-            print("getSupplier", type(err).__name__, err.args)
+            print("ChooseActiveSupplier: getCurrency", type(err).__name__, err.args)
+
+    def chooseCurrency(self, btn):
+        if btn.text() == 'AR$':
+            idx = 1
+            return idx
+        idx = 0
 
     @pyqtSlot()
     def closeChoose(self):
@@ -181,7 +223,7 @@ class Supplier(QDialog):
             self.listPlayers.setModel(modelPlayers)
             self.listPlayers.setModelColumn(1)
             self.listPlayers.setObjectName('contactplayers')
-            self.listPlayers.doubleClicked.connect(lambda : self.checkPerson(APM.CONTACT_POLO_PLAYER))
+            self.listPlayers.doubleClicked.connect(lambda : self.checkPerson(CONTACT_POLO_PLAYER))
             self.listPlayers.setContextMenuPolicy(Qt.CustomContextMenu)
             self.listPlayers.customContextMenuRequested.connect(self.contextMenu)
             self.listPlayers.setMouseTracking(True)
@@ -198,7 +240,7 @@ class Supplier(QDialog):
             self.listBusters.setModelColumn(1)
             self.listBusters.setObjectName('contactbusters')
             self.listBusters.setContextMenuPolicy(Qt.CustomContextMenu)
-            self.listBusters.doubleClicked.connect(lambda : self.checkPerson(APM.CONTACT_BUSTER))
+            self.listBusters.doubleClicked.connect(lambda : self.checkPerson(CONTACT_BUSTER))
             self.listBusters.setContextMenuPolicy(Qt.CustomContextMenu)
             self.listBusters.customContextMenuRequested.connect(self.contextMenu)
             self.listBusters.setEnabled(True) if self.buster else self.listBusters.setEnabled(False)
@@ -223,9 +265,9 @@ class Supplier(QDialog):
                        1:("RP", False, True, True, None),
                        2:("Horse", False, False, False, None),
                        3:("Sex", False, True, True, None),
-                       4:("Coat", False, True, False, None),
+                       4:("Coat", True, True, True, None),
                        5:("Agr No",False, True, True, None),
-                       6:("Date", False, True, False, None),
+                       6:("Date", True, True, True, None),
                        7:("Break", False, True, True, None),
                        8:("B&P",False, True, True, None),
                        9: ("Play", False, True, True, None),
@@ -239,10 +281,10 @@ class Supplier(QDialog):
 
         else:
             pushCancel.setText('Cancel')
-            if self.type == APM.CONTACT_POLO_PLAYER:
+            if self.type == CONTACT_POLO_PLAYER:
                 qry = self.getPoloPlayers()
                 lblAvailable.setText("Available Polo Players")
-            elif self.type == APM.CONTACT_BUSTER:
+            elif self.type == CONTACT_BUSTER:
                 qry = self.getBusters()
                 lblAvailable.setText("Available Horse Busters")
             model = QSqlQueryModel()
@@ -321,9 +363,9 @@ class Supplier(QDialog):
             qry.addBindValue(QVariant(self.supplierId))
             qry.exec()
             if qry.lastError().type() != 0:
-                raise APM.DataError("getHorses", qry.lastError().text())
+                raise DataError("getHorses", qry.lastError().text())
             return qry
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
 
     pyqtSlot()
@@ -347,9 +389,9 @@ class Supplier(QDialog):
                                 WHERE cp.personid = c.id and cp.active)
                                 ORDER BY c.fullname""")
             if qry.lastError().type() != 0:
-                raise APM.DataError("getPlayers", qry.lastError().text())
+                raise DataError("getPlayers", qry.lastError().text())
             return qry
-        except APM.DataError as err:
+        except DataError as err:
             print("getPoloPlayers", err.args)
 
     def getSupplierData(self):
@@ -380,7 +422,8 @@ class Supplier(QDialog):
             qryBuster.exec()
 
             qryLocations = QSqlQuery(self.db)
-            qryLocations.prepare("""SELECT l.id, l.name 
+            qryLocations.prepare("""SELECT l.id, l.name , l.managerid, l.address, l.telephone, l.main, 
+                l.systemlocation, l.active
                 FROM locations l
                 INNER JOIN contacts c
                 ON l.contactid = c.id
@@ -388,10 +431,10 @@ class Supplier(QDialog):
             qryLocations.addBindValue(QVariant(self.supplierId))
             qryLocations.exec()
             return qryPlayer, qryBuster, qryLocations
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
         except Exception as err:
-            print('getSuppliersData', type(err).__name__, err.args)
+            print('Supplier: getSuppliersData', type(err).__name__, err.args)
 
     def getMenu(self):
 
@@ -401,57 +444,54 @@ class Supplier(QDialog):
         editTransferAction.triggered.connect(self.editTransfer)
 
         addInvoiceDownPaymentAction = QAction("Downpayment", self)
-        addInvoiceDownPaymentAction.triggered.connect(lambda: self.addInvoice(APM.PAYABLES_TYPE_DOWNPAYMENT))
+        addInvoiceDownPaymentAction.triggered.connect(lambda: self.addInvoice(PAYABLES_TYPE_DOWNPAYMENT,
+                                                                              OPEN_NEW))
 
         addInvoiceBoardPaymentAction = QAction("Board", self)
-        addInvoiceBoardPaymentAction.triggered.connect(lambda: self.addInvoice(APM.PAYABLES_TYPE_BOARD))
+        addInvoiceBoardPaymentAction.triggered.connect(lambda: self.addInvoice(PAYABLES_TYPE_BOARD,OPEN_NEW))
 
         addInvoiceHalfBreakPaymentAction = QAction("Half Break", self)
-        addInvoiceHalfBreakPaymentAction.triggered.connect(lambda: self.addInvoice(APM.PAYABLES_TYPE_HALF_BREAK))
+        addInvoiceHalfBreakPaymentAction.triggered.connect(lambda: self.addInvoice(PAYABLES_TYPE_HALF_BREAK,
+                                                                                   OPEN_NEW))
 
         addInvoiceBreakFinalPaymentAction = QAction("Final Break", self)
-        addInvoiceBreakFinalPaymentAction.triggered.connect(lambda: self.addInvoice(APM.PAYABLES_TYPE_FULL_BREAK))
+        addInvoiceBreakFinalPaymentAction.triggered.connect(lambda: self.addInvoice(PAYABLES_TYPE_FULL_BREAK,
+                                                                                    OPEN_NEW))
 
         addInvoiceSalePaymentAction = QAction("Sale Share", self)
-        addInvoiceSalePaymentAction.triggered.connect(lambda: self.addInvoice(APM.PAYABLES_TYPE_SALE))
+        addInvoiceSalePaymentAction.triggered.connect(lambda: self.addInvoice(PAYABLES_TYPE_SALE,OPEN_NEW))
 
         addInvoiceOtherPaymentAction = QAction("Other Charges", self)
-        addInvoiceOtherPaymentAction.triggered.connect(lambda: self.addInvoice(APM.PAYABLES_TYPE_OTHER))
+        addInvoiceOtherPaymentAction.triggered.connect(lambda: self.addInvoice(PAYABLES_TYPE_OTHER,OPEN_NEW))
 
         addInvoiceAllPaymentAction = QAction("All Charges", self)
-        addInvoiceAllPaymentAction.triggered.connect(lambda: self.addInvoice(APM.PAYABLES_TYPE_ALL))
+        addInvoiceAllPaymentAction.triggered.connect(lambda: self.addInvoice(PAYABLES_TYPE_ALL,OPEN_NEW))
 
-        addBoardAction = QAction("Board Charges", self)
-        addBoardAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_BOARD,APM.OPEN_NEW))
+        addBoardAction = QAction("Board", self)
+        addBoardAction.triggered.connect(lambda: self.addPayables(OPEN_NEW))
 
-        editBoardAction = QAction("Edit Board Charge", self)
-        editBoardAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_BOARD, APM.OPEN_EDIT))
-
-        addDownpaymentAction = QAction("Dawnpayment Charges", self)
-        addDownpaymentAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_DOWNPAYMENT, APM.OPEN_NEW))
-
-        editDownpaymentAction = QAction("Edit Downpayment",self )
-        editDownpaymentAction.triggered.connect(lambda: self.addPayables(APM.PAYABLES_TYPE_DOWNPAYMENT, APM.OPEN_EDIT))
+        addDownpaymentAction = QAction("Downpayment", self)
+        addDownpaymentAction.triggered.connect(lambda: self.addDownpayments(OPEN_NEW))
 
         addOtherChargeAction = QAction("Other Charges", self)
-        addOtherChargeAction.triggered.connect(lambda : self.addOtherCharges(APM.OPEN_NEW))
-
-        editOtherChargeAction = QAction("Edit Other Charges", self)
-        editOtherChargeAction.triggered.connect(lambda: self.addOtherCharges(APM.OPEN_EDIT))
-
-
+        addOtherChargeAction.triggered.connect(lambda : self.addOtherCharges(OPEN_NEW))
 
         editInvoiceAction = QAction("Edit Invoices", self)
+        editInvoiceAction.triggered.connect(lambda: self.addInvoice(PAYABLES_TYPE_ALL, OPEN_EDIT))
 
         addPaymentAction = QAction("New Payment", self)
-        addPaymentAction.triggered.connect(lambda: self.addPayment(APM.OPEN_NEW))
+        addPaymentAction.triggered.connect(lambda: self.addPayment(OPEN_NEW))
 
         editPaymentAction = QAction("Edit Payment", self)
-        editPaymentAction.triggered.connect(lambda: self.addPayment(APM.OPEN_EDIT))
+        editPaymentAction.triggered.connect(lambda: self.addPayment(OPEN_EDIT))
 
         addLocationAction = QAction("New Location", self)
         addLocationAction.setObjectName("locations")
         addLocationAction.triggered.connect(lambda : self.addItem(addLocationAction))
+
+        editLocationAction = QAction("Edit Locations", self)
+        editLocationAction.setObjectName("Edit_locations")
+        editLocationAction.triggered.connect(lambda: self.addItem(editLocationAction))
 
         addPlayerAction = QAction("AddPlayer", self)
         addPlayerAction.setObjectName("contactplayer")
@@ -460,27 +500,76 @@ class Supplier(QDialog):
         addBusterAction = QAction("Add Buster", self)
         addBusterAction.triggered.connect(lambda : self.addItem(addBusterAction))
 
+        baseIndexAction = QAction(QIcon(":Icons8/Accounts/Index.png"), "Set Base Index", self)
+        baseIndexAction.setToolTip("Update Cost Index value")
+        baseIndexAction.setEnabled(True)
+        baseIndexAction.triggered.connect(lambda: self.setIndex(INDEX_NEW))
+
+        updateIndexAction = QAction(QIcon(":Icons8/Accounts/Index.png"), "Update Index", self)
+        updateIndexAction.setToolTip("Update Cost Index value")
+        updateIndexAction.setEnabled(True)
+        updateIndexAction.triggered.connect(lambda: self.setIndex(INDEX_UPGRADE))
+
+        editIndexAction = QAction("Edit Index", self)
+
+        editOtherChargeAction = QAction("Other Charges", self)
+        editOtherChargeAction.triggered.connect(lambda: self.editPayables(PAYABLES_TYPE_OTHER))
+
+        editDownpaymentAction = QAction("Downpayments", self)
+        editDownpaymentAction.triggered.connect(lambda: self.editPayables(PAYABLES_TYPE_DOWNPAYMENT))
+
+        editBoardAction = QAction("Board Charges", self)
+        editBoardAction.triggered.connect(lambda: self.editPayables(PAYABLES_TYPE_BOARD))
+
+        editAllChargesAction = QAction("All Charges", self)
+        editAllChargesAction.triggered.connect(lambda: self.editPayables(PAYABLES_TYPE_ALL))
+
+        editSaleAction = QAction("Sale Charges", self)
+        editSaleAction.triggered.connect(lambda: self.editPayables(PAYABLES_TYPE_SALE))
+
+        editHalfBreakAction = QAction("Half Break Charges", self)
+        editHalfBreakAction.triggered.connect(lambda: self.editPayables(PAYABLES_TYPE_HALF_BREAK))
+
+        editFullBreakAction = QAction("Board Charges", self)
+        editFullBreakAction.triggered.connect(lambda: self.editPayables(PAYABLES_TYPE_FULL_BREAK))
+
+        printInvoiceAction = QAction("Print Invoices", self)
+        printInvoiceAction.triggered.connect(lambda:self.printAccountDocument(ACCOUNT_INVOICE))
+
+        printPaymentAction = QAction("Print Payment", self)
+        printPaymentAction.triggered.connect(lambda:self.printAccountDocument(ACCOUNT_PAYMENT))
+
+        printAccountAction = QAction("Print Account", self)
+        printAccountAction.triggered.connect(lambda:self.printAccountDocument(ACCOUNT_ALL))
+
+        printHorseBalanceAction = QAction("Horse Account", self)
+        printHorseBalanceAction.triggered.connect(lambda : self.printAccountDocument(ACCOUNT_HORSE_BALANCE))
 
         supplierMenu = QMenuBar(self)
 
         locationsMenu = supplierMenu.addMenu("Locations")
         locationsMenu.addAction(addLocationAction)
+        locationsMenu.addAction(editLocationAction)
+
         transferMenu = supplierMenu.addMenu("Transfers")
         transferMenu.addAction(addTransferAction)
         transferMenu.addAction(editTransferAction)
 
-
-        billingMenu = supplierMenu.addMenu('Billing')
+        billingMenu = supplierMenu.addMenu('Charges')
         billingMenu.addAction(addBoardAction)
         billingMenu.addAction(addDownpaymentAction)
         billingMenu.addAction(addOtherChargeAction)
         billingMenu.addSeparator()
         editBillingMenu = billingMenu.addMenu('Edit')
+        editBillingMenu.addAction(editAllChargesAction)
         editBillingMenu.addAction(editBoardAction)
         editBillingMenu.addAction(editDownpaymentAction)
         editBillingMenu.addAction(editOtherChargeAction)
+        editBillingMenu.addAction(editSaleAction)
+        editBillingMenu.addAction(editHalfBreakAction)
+        editBillingMenu.addAction(editFullBreakAction)
 
-        invoicesMenu = supplierMenu.addMenu("Invoices")
+        invoicesMenu = supplierMenu.addMenu("Billing")
         invoicesMenu.addAction(addInvoiceAllPaymentAction)
         invoicesMenu.addAction(addInvoiceDownPaymentAction)
         invoicesMenu.addAction(addInvoiceBoardPaymentAction)
@@ -500,7 +589,40 @@ class Supplier(QDialog):
         contactsMenu.addAction(addPlayerAction)
         contactsMenu.addAction(addBusterAction)
 
+        costIndexMenu = supplierMenu.addMenu("Cost Index")
+        costIndexMenu.addAction(baseIndexAction)
+        costIndexMenu.addAction(updateIndexAction)
+        costIndexMenu.addAction(editIndexAction)
+
+        printingMenu = supplierMenu.addMenu("Print")
+        printingMenu.addAction(printInvoiceAction)
+        printingMenu.addAction(printPaymentAction)
+        printingMenu.addAction(printAccountAction)
+        printingMenu.addAction(printHorseBalanceAction)
         return supplierMenu
+
+    @pyqtSlot()
+    def printAccountDocument(self, documentType):
+        try:
+            doc = AvailableDocuments(self.db, documentType, self.supplierId, self)
+            doc.show()
+            doc.exec()
+        except DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print("Supplier: printAccountDocument", err.args)
+
+    @pyqtSlot()
+    def setIndex(self, mode):
+        try:
+            cix = CostIndex(self.db, QDate.currentDate(), self.supplierId,
+                            supplierName=self.windowTitle(), mode=mode)
+            cix.show()
+            cix.exec()
+        except DataError as err:
+            print(err.source, err.message)
+        except Exception as err:
+            print(type(err), err.args)
 
     def getBusters(self):
         try:
@@ -514,9 +636,9 @@ class Supplier(QDialog):
                                 AND cb.active )
                             ORDER BY c.fullname""")
             if qry.lastError().type() != 0:
-                raise APM.DataError("getPlayers", qry.lastError().text())
+                raise DataError("getPlayers", qry.lastError().text())
             return qry
-        except APM.DataError as err:
+        except DataError as err:
             print("getPoloPlayers", err.args)
 
     def getSupplier(self):
@@ -531,7 +653,7 @@ class Supplier(QDialog):
             qry.addBindValue(QVariant(self.supplierId))
             qry.exec()
             if qry.size() == -1:
-                raise APM.DataError(qry.lastError().text())
+                raise DataError("Supplier: getSupplier", qry.lastError().text())
             qry.first()
             supplier = qry.value(1)
             if qry.value(2) == True:
@@ -539,7 +661,7 @@ class Supplier(QDialog):
             if qry.value(3):
                 self.busters = True
             return supplier
-        except APM.DataError as err:
+        except DataError as err:
             print("getSupplier", err.args)
 
     @pyqtSlot()
@@ -547,7 +669,7 @@ class Supplier(QDialog):
         try:
             #"Determine if the player/buster exists as inactive"
             qry = QSqlQuery(self.db)
-            sql_look = """SELECT id FROM contactplayers""" if self.type == APM.CONTACT_POLO_PLAYER \
+            sql_look = """SELECT id FROM contactplayers""" if self.type == CONTACT_POLO_PLAYER \
                 else """SELECT id FROM contactbusters"""
             sql_look += """ WHERE NOT active 
                     AND contactid = ? 
@@ -558,7 +680,7 @@ class Supplier(QDialog):
             qry.addBindValue(QVariant(self.combo.currentText()))
             qry.exec()
             if qry.size() > 0:
-                sql_qry = """UPDATE contactPlayers """ if self.type  == APM.CONTACT_POLO_PLAYER else \
+                sql_qry = """UPDATE contactPlayers """ if self.type  == CONTACT_POLO_PLAYER else \
                         """UPDATE contactbusters """
                 sql_qry += """SET active = 1
                         WHERE contactid = ? 
@@ -566,26 +688,26 @@ class Supplier(QDialog):
                 qry.prepare(sql_qry)
             else:
                 sql_qry = "INSERT INTO contactplayers " \
-                if self.type == APM.CONTACT_POLO_PLAYER else "INSERT INTO contactbusters "
+                if self.type == CONTACT_POLO_PLAYER else "INSERT INTO contactbusters "
             qry.prepare(sql_qry + "(contactid, personid) VALUES (?, ?)")
             qry.addBindValue(QVariant(self.supplierId))
             qry.addBindValue(QVariant(self.combo.currentText()))
             qry.exec()
             if qry.lastError().type() != 0:
-                raise APM.DataError('SaveAndClose', qry.lastError().text())
+                raise DataError('SaveAndClose', qry.lastError().text())
             self.combo.setModelColumn(1)
             self.close()
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
 
     @pyqtSlot()
     def checkPerson(self, type=None):
         self.sender().model().query().seek(-1)
-        if type == APM.CONTACT_POLO_PLAYER:
+        if type == CONTACT_POLO_PLAYER:
             row = self.listPlayers.currentIndex().row()
             self.listPlayers.model().query().seek(row)
             record = self.listPlayers.model().query().record()
-        elif type == APM.CONTACT_BUSTER:
+        elif type == CONTACT_BUSTER:
             row = self.listBusters.currentIndex().row()
             self.listBusters.model().query().seek(row)
             record = self.listBusters.model().query().record()
@@ -594,29 +716,28 @@ class Supplier(QDialog):
             self.listLocations.model().query().seek(row)
             record = self.listLocations.model().query().record()
         msg = QMessageBox()
-        msg.setText("Delete or Edit {}?".format(record.value(1))) if type is not None else \
-            msg.setText("Edit {} ?".format(record.value(1)))
+        msg.setText("Delete or Edit {}?".format(record.value(1)))
         msg.setWindowTitle("Choose an option")
         editButton = msg.addButton("Edit", QMessageBox.ActionRole)
-        deleteButton = None
-        if type is not None:
-            deleteButton = msg.addButton("Delete",QMessageBox.ActionRole)
+        deleteButton = msg.addButton("Delete",QMessageBox.ActionRole)
         msg.addButton(QMessageBox.Cancel)
         res = msg.exec()
         if self.sender().objectName() != 'locations':
             if msg.clickedButton() == editButton:
-                res = Contacts(self.db, fullname=record.value(1),mode=APM.OPEN_EDIT_ONE,contactid=record.value(0))
+                res = Contacts(self.db, fullname=record.value(1),mode=OPEN_EDIT_ONE,contactid=record.value(0))
                 res.show()
                 res.exec()
             elif msg.clickedButton() == deleteButton:
-                print("Delete")
+                self.deleteItem()
             else:
                 msg.close()
         else:
             if msg.clickedButton() == editButton:
-                res = Location(self.db,self.supplierId, record.value(0),APM.OPEN_EDIT_ONE)
+                res = Location(self.db,self.supplierId, record=record,parent=self, mode=OPEN_EDIT_ONE)
                 res.show()
                 res.exec()
+            elif msg.clickedButton() == deleteButton:
+                self.deleteItem()
             else:
                 msg.close()
 
@@ -662,17 +783,21 @@ class Supplier(QDialog):
 
     @pyqtSlot()
     def addItem(self, object):
-        print(object, object.objectName())
         try:
-            if object.objectName() != 'locations':
-                type = APM.CONTACT_POLO_PLAYER if object.objectName() == 'contactplayers' else APM.CONTACT_BUSTER
+            if object.objectName().find('locations') < 0:
+                type = CONTACT_POLO_PLAYER if object.objectName() == 'contactplayers' else CONTACT_BUSTER
                 res = Supplier(self.db,self.supplierId,type)
                 res.show()
                 res.exec()
             elif object.objectName() == 'locations':
-                res = Location(self.db, self.supplierId)
+                res = Location(self.db, self.supplierId, parent=self)
                 res.show()
                 res.exec()
+            elif object.objectName() == 'Edit_locations':
+                res = Location(self.db, self.supplierId, parent=self, mode=OPEN_EDIT)
+                res.show()
+                res.exec()
+
             self.updateListView(object)
         except Exception as err:
             print("addItem", err)
@@ -681,17 +806,25 @@ class Supplier(QDialog):
         try:
             qryPlayer, qryBuster, qryLocations = self.getSupplierData()
             if object.objectName() == 'contactplayers':
-                object.model().setQuery(qryPlayer)
+                self.listPlayers.model().setQuery(qryPlayer)
             elif object.objectName() == 'contactbusters':
-                object.model().setQuery(qryBuster)
-            elif object.objectName() == 'locations':
-                object.model().setQuery(qryLocations)
+                self.listBusters.model().setQuery(qryBuster)
+            elif object.objectName().find('locations') > 0:
+                self.listLocations.model().setQuery(qryLocations)
         except AttributeError as err:
             print("UpdateListView",err.args)
 
     @pyqtSlot()
-    def deleteItem(self, data):
+    def deleteItem(self, data= None):
         try:
+            if data is None:
+                object = self.sender()
+                object.model().query().seek(-1)
+                row = object.currentIndex().row()
+                object.model().query().seek(row)
+                record = object.model().query().record()
+                data = (record, object)
+
             res = QMessageBox.warning(self, "Delete", "Do you want to delete {}".format(
                 data[0].value(1)), QMessageBox.Yes | QMessageBox.No)
             if res == QMessageBox.No:
@@ -712,10 +845,10 @@ class Supplier(QDialog):
                 qry.addBindValue(QVariant(data[0].value(0)))
                 qry.exec()
             if qry.lastError().type() != 0:
-                raise APM.DataError('deleteItem', qry.lastError().text())
+                raise DataError('Supplier: deleteItem', qry.lastError().text())
             self.updateListView(data[1])
 
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
 
     @pyqtSlot()
@@ -743,10 +876,10 @@ class Supplier(QDialog):
                 qry.addBindValue(QVariant(data[0].value(0)))
             qry.exec()
             if qry.lastError().type() != 0 :
-                raise APM.DataError('inactivateItem', qry.lastError.text())
+                raise DataError('inactivateItem', qry.lastError.text())
             self.updateListView(data[1])
 
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
 
     @pyqtSlot()
@@ -764,7 +897,7 @@ class Supplier(QDialog):
             qry.exec()
             qry.first()
             return qry.value(0), qry.value(1)
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
 
     @pyqtSlot()
@@ -775,18 +908,19 @@ class Supplier(QDialog):
 
     @pyqtSlot()
     def editTransfer(self):
-        res = Transfer(self.db, self.supplierId, mode=APM.OPEN_EDIT, parent=self.parent)
+        res = Transfer(self.db, self.supplierId, mode=OPEN_EDIT, parent=self.parent)
         res.show()
         res.exec()
 
     @pyqtSlot()
-    def addInvoice(self, payableType):
+    def addInvoice(self, payableType,mode):
         try:
-            res = Invoice(self.db, self.supplierId, payableType,mode=APM.OPEN_NEW,
+            res = Invoice(self.db, self.supplierId, payableType,mode=mode,
                       con_string = self.parent.con_string, parent=self.parent )
             res.show()
-            #res.exec()
-        except APM.DataError as err:
+            res.exec()
+        except DataError as err:
+            QMessageBox.warning(self, err.source, err.message, QMessageBox.Ok)
             print(err.source, err.message)
 
     @pyqtSlot()
@@ -795,37 +929,60 @@ class Supplier(QDialog):
             res = Payment(self.db, self.supplierId, mode,parent=self.parent)
             res.show()
             res.exec()
-
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
         except Exception as err:
             print(type(err), err.args)
 
     @pyqtSlot()
-    def addPayables(self, payableType,openMode):
+    def addPayables(self,openMode):
         try:
-            res = Payables(self.db, self.supplierId, payableType, mode=openMode, parent=self.parent)
+            res = Payables(self.db, self.supplierId, mode=openMode, parent=self.parent)
             res.show()
             res.exec()
-        except APM.DataError as err:
+        except DataError as err:
+            QMessageBox.warning(self, err.source, err.message)
             print(err.source, err.message)
         except Exception as err:
             print('addPayables',type(err).__name__, err.args)
 
+    @pyqtSlot()
+    def editPayables(self, payableType):
+        try:
+            res = EditPayables(self.db, self.supplierId, payableType=payableType, parent=self.parent)
+            res.show()
+            res.exec()
+        except DataError as err:
+            QMessageBox.warning(self, err.source, err.message)
+            print(err.source, err.message)
+        except Exception as err:
+            print('Supplier; editPayables', type(err).__name__, err.args)
+
+    def addDownpayments(self, openMode):
+        try:
+            res = Downpayments(self.db, self.supplierId, parent=self.parent)
+            res.show()
+            res.exec()
+        except DataError as err:
+            QMessageBox.warning(self, err.source, err.message)
+            print(err.source, err.message)
+        except Exception as err:
+            print('addDownpayments',type(err).__name__, err.args)
+
     def addOtherCharges(self, mode):
         try:
-            res = OtherCharge(self.db,self.supplierId, mode, self.parent.con_string,parent=self.parent)
+            res = OtherCharge(self.db,self.supplierId, mode,parent=self.parent)
             res.show()
             res.exec()
 
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
         except Exception as err:
             print('addOtherCharges',type(err).__name__, err.args)
 
 class Contacts(QDialog):
 
-    def __init__(self, db, fullname=None, mode=APM.OPEN_NEW, contactid = None, parent=None):
+    def __init__(self, db, fullname=None, mode=OPEN_NEW, contactid = None, parent=None):
         super().__init__()
         self.parent = parent
         self.db = db
@@ -855,10 +1012,12 @@ class Contacts(QDialog):
         self.linePhone.setMaximumWidth(250)
         self.linePhone.editingFinished.connect(self.enableSave)
 
+        rx = EMAILREGEXP
         lblEmail = QLabel('Email')
-        self.lineEmail = QLineEdit()
+        self.lineEmail = LineEditHover()
         self.lineEmail.setToolTip("Contact Email address")
         self.lineEmail.setMaximumWidth(250)
+        self.lineEmail.setRegExpValidator(rx)
         self.lineEmail.editingFinished.connect(self.enableSave)
 
         self.checkPlayer = QCheckBox("Polo Seller")
@@ -954,7 +1113,7 @@ class Contacts(QDialog):
         hLayoutButtons.addSpacing(400)
         hLayoutButtons.addWidget(pushCancel)
         hLayoutButtons.addWidget(self.pushSave)
-        if self.mode != APM.OPEN_NEW:
+        if self.mode != OPEN_NEW:
             self.pushDelete = QPushButton("Delete")
             self.pushDelete.setMaximumWidth(60)
             self.pushDelete.clicked.connect(self.deleteContact)
@@ -969,7 +1128,7 @@ class Contacts(QDialog):
         vLayout.addLayout(hLayoutBottom)
         vLayout.addLayout(hLayoutActive)
         vLayout.addSpacing(20)
-        if self.mode == APM.OPEN_EDIT:
+        if self.mode == OPEN_EDIT:
             try:
                 self.setMinimumWidth(850)
                 colDict = {
@@ -996,19 +1155,19 @@ class Contacts(QDialog):
                 self.tableContacts.doubleClicked.connect(self.getContactData)
                 hLayoutButtons.insertStretch(0,5)
                 vLayout.addWidget(self.tableContacts)
-            except APM.DataError as err:
+            except DataError as err:
                 print(type(err).__name__, err.args)
                 res = QMessageBox.warning(self, err.args[0],err.args[1])
                 sys.exit()
             except Exception as err:
                 print(type(err).__name__, err.args)
-        elif self.mode == APM.OPEN_EDIT_ONE:
+        elif self.mode == OPEN_EDIT_ONE:
             self.loadContact()
         vLayout.addLayout(hLayoutButtons)
 
         self.setLayout(vLayout)
-        self.setWindowTitle("New Contact" if self.mode == APM.OPEN_NEW else "Edit Contact:")
-        self.tableContacts.setFocus() if self.mode == APM.OPEN_EDIT else self.lineName.setFocus()
+        self.setWindowTitle("New Contact" if self.mode == OPEN_NEW else "Edit Contact:")
+        self.tableContacts.setFocus() if self.mode == OPEN_EDIT else self.lineName.setFocus()
 
     @pyqtSlot()
     def getContactData(self):
@@ -1081,7 +1240,7 @@ class Contacts(QDialog):
         send_object = self.sender()
         if isinstance(send_object, QPushButton):
             return
-        if self.mode == APM.OPEN_EDIT and self.contactid is None:
+        if self.mode == OPEN_EDIT and self.contactid is None:
             QMessageBox.warning(self, "Wrong Mode", "Cannot save a new contact in the edit form!", )
             self.pushSave.setEnabled(False)
             if isinstance(send_object, QLineEdit):
@@ -1110,7 +1269,7 @@ class Contacts(QDialog):
             #self.lineName.clear()
             self.lineName.setFocus()
             return
-        if self.mode == APM.OPEN_NEW:
+        if self.mode == OPEN_NEW:
             qry = QSqlQuery(self.db)
             #qry = QSqlQuery(self.cdb)
             qry.prepare("""SELECT id FROM contacts 
@@ -1158,7 +1317,7 @@ class Contacts(QDialog):
     @pyqtSlot()
     def saveAndClose(self):
         qry = QSqlQuery(self.db)
-        if self.mode == APM.OPEN_NEW:
+        if self.mode == OPEN_NEW:
             qry.prepare("""
             INSERT INTO contacts
             (fullname,
@@ -1208,14 +1367,14 @@ class Contacts(QDialog):
         qry.addBindValue(QVariant(self.checkVeterinary.isChecked()))
         qry.addBindValue(QVariant(self.checkDriver.isChecked()))
         qry.addBindValue(QVariant(self.checkActive.isChecked()))
-        if self.mode == APM.OPEN_EDIT:
+        if self.mode == OPEN_EDIT:
             qry.addBindValue(QVariant(self.contactid))
         try:
             qry.exec()
             if qry.numRowsAffected() != 1:
                 print(qry.lastError().text())
-                raise APM.DataError('SaveAndClose',qry.lastError().text())
-        except APM.DataError as err:
+                raise DataError('SaveAndClose',qry.lastError().text())
+        except DataError as err:
             print(err.source, err.message)
             return
         except Exception as err:
@@ -1282,28 +1441,28 @@ class ShowContacts(QDialog):
                  if(active = 1, _ucs2 X'2714', '')
                  FROM contacts """
             try:
-                if self.type == APM.CONTACT_BUYER:
+                if self.type == CONTACT_BUYER:
                     where = "WHERE buyer "
                     self.setWindowTitle("Horse Buyers")
-                elif self.type == APM.CONTACT_DEALER:
+                elif self.type == CONTACT_DEALER:
                     where = "WHERE dealer "
                     self.setWindowTitle("Horse Dealers")
-                elif self.type == APM.CONTACT_BREAKER:
+                elif self.type == CONTACT_BREAKER:
                     where = "WHERE horsebreaker "
                     self.setWindowTitle("Horse Breakers")
-                elif self.type == APM.CONTACT_RESPONSIBLE:
+                elif self.type == CONTACT_RESPONSIBLE:
                     where = "WHERE responsible "
                     self.setWindowTitle("Authorized Representative")
-                elif self.type == APM.CONTACT_PLAYER:
+                elif self.type == CONTACT_PLAYER:
                     where = "WHERE playerseller "
                     self.setWindowTitle("Polo Player Sellers")
-                elif self.type == APM.CONTACT_POLO_PLAYER:
+                elif self.type == CONTACT_POLO_PLAYER:
                     where = "WHERE player "
                     self.setWindowTitle("Polo Players")
-                elif self.type ==APM.CONTACT_BUSTER:
+                elif self.type ==CONTACT_BUSTER:
                     where = "WHERE breaker "
                     self.setWindowTitle('Horse Busters')
-                elif self.type == APM.CONTACT_VETERINARY:
+                elif self.type == CONTACT_VETERINARY:
                     where = "WHERE veterinary "
                     self.setWindowTitle('Horse Veterinarians')
                 qry.prepare(select + where + "ORDER BY fullname")
@@ -1315,15 +1474,18 @@ class ShowContacts(QDialog):
 
 class Location(QDialog):
 
-    def __init__(self, db, supplierId, locationId=None, name=None, mode = APM.OPEN_NEW):
+    def __init__(self, db, supplierId, record=None, parent=None, mode=OPEN_NEW):
         super().__init__()
         self.db = db
         self.supplierId = supplierId
         self.supplier = self.getSupplier()
         self.setModal(True)
-        self.locationId = locationId
-        self.name = name
+        self.locationid = None
+        self.name = None
         self.mode = mode
+        self.record = record
+        self.parent = parent
+        self.setObjectName('Locations')
         self.setUI()
 
 
@@ -1363,6 +1525,10 @@ class Location(QDialog):
         self.checkMain.stateChanged.connect(lambda : self.checkMainData(self.checkMain.isChecked()))
         self.checkMain.stateChanged.connect(self.enableSave)
 
+        self.checkSystem = QCheckBox('System Location')
+        self.checkSystem.setChecked(False)
+        self.checkSystem.stateChanged.connect(self.enableSave)
+
 
         pushCancel = QPushButton("Cancel")
         pushCancel.setMaximumWidth(70)
@@ -1374,13 +1540,19 @@ class Location(QDialog):
         self.pushSave.setEnabled(False)
 
         pushLayout = QHBoxLayout()
-        if self.mode != APM.OPEN_NEW:
+        if self.mode != OPEN_NEW:
+            self.pushDelete = QPushButton("Delete")
+            self.pushDelete.setMaximumWidth(70)
+            self.pushDelete.clicked.connect(self.deleteLocation)
+            self.pushDelete.setEnabled(False)
+
             #self.loadRecord(self.getData())
             self.pushEdit = QPushButton("Edit")
             self.pushEdit.setMaximumWidth(70)
             self.pushEdit.clicked.connect(lambda: self.enableEdit(True))
             self.enableEdit(False)
 
+            pushLayout.addWidget(self.pushDelete)
             pushLayout.addWidget(self.pushEdit)
 
         frmLayout = QFormLayout()
@@ -1391,6 +1563,7 @@ class Location(QDialog):
 
         ckLayout = QHBoxLayout()
         ckLayout.addSpacing(100)
+        ckLayout.addWidget(self.checkSystem,Qt.AlignRight)
         ckLayout.addWidget(self.checkMain, Qt.AlignLeft)
         ckLayout.addWidget(self.checkActive,Qt.AlignRight)
 
@@ -1398,18 +1571,22 @@ class Location(QDialog):
         pushLayout.addWidget(pushCancel,Qt.AlignLeft)
         pushLayout.addWidget(self.pushSave,Qt.AlignRight)
 
-        if self.mode == APM.OPEN_EDIT:
+        if self.mode == OPEN_EDIT:
             qry = self.getLocations()
             colorDict = {'column':(5),
                 u'\u2714':(QColor('yellow'), QColor('red'))}
             colDict = {0:("ID", True, True, True, None),
                        1:("Location", False, False, False, None),
-                       2:("Address", True, True, False, None),
-                       3:("Manager", False, True, False, None),
-                       4:("Phone",False, True, False, None ),
-                       5:("main", False, True, True, None),
-                       6:("Active", False, True, True, None),
-                       7:("ManagerID", True, True, False, None)}
+                       2:("Managerid", True, True, True, None),
+                       3:("Address", True, True, False, None),
+                       4:("Phone", False, True, False, None),
+                       5:("MainCode", True, True, False, None),
+                       6:("SystemCode", True, True, False, None),
+                       7:("ActiveCode", True, True, False, None),
+                       8:("Manager", False, True, False, None),
+                       9:("main", False, True, True, None),
+                       10:("System", False, True, True, None),
+                       11:("Active", False, True, True, None)}
             self.tableLocations = TableViewAndModel(colDict, colorDict,(50, 50), qry)
             self.tableLocations.setMinimumWidth(500)
             self.tableLocations.doubleClicked.connect(lambda: self.loadRecord(self.getData()))
@@ -1419,23 +1596,40 @@ class Location(QDialog):
         vLayout = QVBoxLayout()
         vLayout.addLayout(frmLayout)
         vLayout.addLayout(ckLayout)
-        if self.mode != APM.OPEN_NEW:
+        if self.mode == OPEN_EDIT:
             vLayout.addWidget(self.tableLocations)
         vLayout.addLayout(pushLayout)
         self.setLayout(vLayout)
 
-        if self.name:
-            self.lineLocation.setText(self.name)
+        if self.record:
+            self.loadRecord(self.record)
+
+    @pyqtSlot()
+    def deleteLocation(self):
+        try:
+            res = QMessageBox.question(self, "Delete Location",
+                                       "Do you want to delete location {}?".format(self.record.value(1)),
+                                       QMessageBox.Yes|QMessageBox.No)
+            if res != QMessageBox.Yes:
+                return
+            qry = QSqlQuery(self.db)
+            qry.prepare("""DELETE FROM locations WHERE id = ?""")
+            qry.addBindValue(QVariant(self.record.value(0)))
+            qry.exec()
+            if qry.lastError().type() != 0:
+                raise DataError("Location: deleteLocation", qry.lastQuery().text())
+        except DataError as err:
+            print(err.source, err.message)
 
     def getLocations(self):
         try:
             with Cdatabase(self.db, 'getLocations') as db:
                 qry = QSqlQuery(db)
-                qry.prepare("""SELECT l.id, l.name, l.address,
-                        c.fullname, l.telephone,
-                        if (l.main = 1, _ucs2 x'2714' , ''), 
-                        if (l.active = 1, _ucs2 x'2714', ''),
-                         l.managerid
+                qry.prepare("""SELECT l.id, l.name, l.managerid, l.address,l.telephone, l.main,
+                        l.systemlocation, l.active, c.fullname, 
+                        if (l.main = 1, _ucs2 x'2714' , ''),
+                        if (l.systemlocation = 1, _ucs2 x'2714',''), 
+                        if (l.active = 1, _ucs2 x'2714', '')
                         FROM locations l
                         LEFT JOIN contacts c
                         ON l.managerid = c.id
@@ -1443,9 +1637,9 @@ class Location(QDialog):
                 qry.addBindValue(QVariant(self.supplierId))
                 qry.exec()
                 if qry.lastError().type() != 0:
-                    raise APM.DataError('getLocations', qry.lastError().text())
+                    raise DataError('getLocations', qry.lastError().text())
                 return qry
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
 
     def getLocationData(self):
@@ -1459,9 +1653,9 @@ class Location(QDialog):
                 WHERE id = ?""")
                 qry.exec()
                 if qry.lastError().type() != 0:
-                    raise APM.DataError('getLocationData', qry.lastError().text())
+                    raise DataError('getLocationData', qry.lastError().text())
 
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
 
     def getSupplier(self):
@@ -1474,10 +1668,10 @@ class Location(QDialog):
                 qry.addBindValue(QVariant(self.supplierId))
                 qry.exec()
                 if qry.lastError().type() != 0:
-                    raise APM.DataError("getSupplier", qry.lastError().text())
+                    raise DataError("getSupplier", qry.lastError().text())
                 qry.first()
                 return qry.value(0)
-        except APM.DataError as err:
+        except DataError as err:
             print('getSupplier', err.source, err.message)
 
     def getData(self):
@@ -1514,9 +1708,9 @@ class Location(QDialog):
                 qry.addBindValue(QVariant(self.supplierId))
                 qry.exec()
                 if qry.lastError().type() != 0:
-                    raise APM.DataError("getStaff", qry.lastError().text())
+                    raise DataError("getStaff", qry.lastError().text())
                 return qry
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
 
     @pyqtSlot()
@@ -1533,15 +1727,17 @@ class Location(QDialog):
     @pyqtSlot()
     def enableEdit(self, option):
         try:
-            if option:
-                self.tableLocations.selectedIndexes()[0]
-                self.loadRecord(self.getData())
+            #if option:
+            #    self.tableLocations.selectedIndexes()[0]
+            #    self.loadRecord(self.getData())
             self.lineLocation.setEnabled(option)
             self.lineTelephone.setEnabled(option)
             self.textAddress.setEnabled(option)
             self.comboManager.setEnabled(option)
             self.checkActive.setEnabled(option)
             self.checkMain.setEnabled(option)
+            self.checkSystem.setEnabled(option)
+            self.pushDelete.setEnabled(option)
         except Exception as err:
             pass
 
@@ -1549,10 +1745,10 @@ class Location(QDialog):
         try:
             with Cdatabase(self.db, 'SaveAndClose') as db:
                 qry = QSqlQuery(db)
-                if self.mode == APM.OPEN_NEW:
+                if self.mode == OPEN_NEW:
                     qry.prepare(""" INSERT INTO locations 
-                    (name, contactid, address, managerid, telephone, main, active)
-                    VALUES(?, ?, ?, ?, ?, ?, ?)""")
+                    (name, contactid, address, managerid, telephone, main, active, systemlocation)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?)""")
                     qry.addBindValue(QVariant(self.lineLocation.text()))
                     qry.addBindValue((QVariant(self.supplierId)))
                     qry.addBindValue(QVariant(self.textAddress.toPlainText()))
@@ -1562,30 +1758,31 @@ class Location(QDialog):
                     qry.addBindValue(QVariant(self.lineTelephone.text()))
                     qry.addBindValue(QVariant(self.checkMain.isChecked()))
                     qry.addBindValue(QVariant(self.checkActive.isChecked()))
+                    qry.addBindValue(QVariant(self.checkSystem.isChecked()))
                     qry.exec()
                     if qry.lastError().type() != 0:
-                        raise APM.DataError("SaveAndClose", qry.lastError().text())
-                    self.close()
+                        raise DataError("SaveAndClose", qry.lastError().text())
                 else:
                     self.comboManager.setModelColumn(0)
                     qry.prepare("""UPDATE locations 
-                        SET name = ?, contactid = ?, address = ?, 
+                        SET name = ?, address = ?, 
                         managerid = ?, telephone = ?, 
-                        main = ?, active = ? 
+                        main = ?, active = ? , systemlocation = ?
                         WHERE id = ?""")
                     qry.addBindValue(QVariant(self.lineLocation.text()))
-                    qry.addBindValue((QVariant(self.supplierId)))
                     qry.addBindValue(QVariant(self.textAddress.toPlainText()))
                     qry.addBindValue(QVariant(self.comboManager.currentText()))
                     qry.addBindValue(QVariant(self.lineTelephone.text()))
                     qry.addBindValue(QVariant(self.checkMain.isChecked()))
                     qry.addBindValue(QVariant(self.checkActive.isChecked()))
-                    qry.addBindValue(QVariant(self.locationid))
+                    qry.addBindValue(QVariant(self.checkSystem.isChecked()))
+                    qry.addBindValue(QVariant(self.record.value(0)))
                     qry.exec()
                     if qry.lastError().type() != 0:
-                        raise APM.DataError("SaveAndClose", qry.lastError().text())
-                    self.close()
-        except APM.DataError as err:
+                        raise DataError("SaveAndClose", qry.lastError().text())
+                self.parent.updateListView(self)
+                self.close()
+        except DataError as err:
             print(err.source, err.message)
 
     @pyqtSlot()
@@ -1603,7 +1800,7 @@ class Location(QDialog):
                 qry.addBindValue(QVariant(self.supplierId))
                 qry.exec()
                 if qry.lastError().type() != 0 :
-                    raise APM.DataError('checkMainData', qry.lastError().text())
+                    raise DataError('checkMainData', qry.lastError().text())
                 if qry.size() > 0:
                     qry.first()
                     res = QMessageBox.warning(self,
@@ -1618,7 +1815,7 @@ class Location(QDialog):
     @pyqtSlot()
     def checkExistence(self, name):
         try:
-            if self.mode != APM.OPEN_NEW:
+            if self.mode != OPEN_NEW:
                 return
             with Cdatabase(self.db, "checkExistence") as db:
                 qry = QSqlQuery(db)
@@ -1631,7 +1828,7 @@ class Location(QDialog):
                 qry.addBindValue(QVariant(self.supplierId))
                 qry.exec()
                 if qry.lastError().type() != 0 :
-                    raise APM.DataError('checkExistence', qry.lastError().text())
+                    raise DataError('checkExistence', qry.lastError().text())
                 if qry.size() > 0:
                     qry.first()
                     res = QMessageBox.question(self, "Location","An inactive location '{}' is "
@@ -1641,29 +1838,43 @@ class Location(QDialog):
                         self.loadRecord(qry.record())
                 self.enableSave()
                 return True
-        except APM.DataError as err:
+        except DataError as err:
             print(err.source, err.message)
         except Exception as err:
             print("CheckExistence", err.args)
 
     def loadRecord(self, record):
         try:
-            self.getData()
-            self.lineLocation.setText(record.value(1))
-            self.textAddress.setPlainText(record.value(2))
-            self.lineTelephone.setText(record.value(4))
-            if record.value(5) == u'\u2714':
-                self.checkMain.setChecked(True)
+            if not record:
+                self.getData()
+                self.lineLocation.setText(record.value(1))
+                self.textAddress.setPlainText(record.value(2))
+                self.lineTelephone.setText(record.value(4))
+                if record.value(5) == u'\u2714':
+                    self.checkMain.setChecked(True)
+                else:
+                    self.checkMain.setChecked(False)
+                if record.value(6) == u'\u2714':
+                    self.checkActive.setChecked(True)
+                else :
+                    self.checkActive.setChecked(False)
+                self.comboManager.seek(record.value(7), 0)
+                self.locationid = record.value(0)
             else:
-                self.checkMain.setChecked(False)
-            if record.value(6) == u'\u2714':
-                self.checkActive.setChecked(True)
-            else :
-                self.checkActive.setChecked(False)
-            self.comboManager.seek(record.value(7), 0)
-            self.locationid = record.value(0)
+                self.lineLocation.setText(record.value(1))
+                self.textAddress.setPlainText(record.value(3))
+                if self.mode == OPEN_EDIT:
+                    self.comboManager.setCurrentText(record.value(8))
+                else:
+                    self.comboManager.setModelColumn(0)
+                    self.comboManager.setCurrentText(str(record.value(2)))
+                    self.comboManager.setModelColumn(1)
+                self.lineTelephone.setText(record.value(4))
+                self.checkMain.setChecked(record.value(5))
+                self.checkSystem.setChecked(record.value(6))
+                self.checkActive.setChecked(record.value(7))
         except Exception as err:
-            print('loadRecord', err.args)
+            print('Location: loadRecord', err.args)
 
 
 

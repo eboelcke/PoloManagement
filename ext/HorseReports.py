@@ -4,11 +4,12 @@ from PyQt5.QtWidgets import (QMessageBox, QDialog, QPushButton, QTableView, QVBo
                              QHeaderView, QHBoxLayout)
 from PyQt5.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt5.QtCore import Qt, QVariant
-from PyQt5.QtGui import QColor, QTextLength
+from PyQt5.QtGui import QColor, QTextLength, QIcon
 from PyQt5.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
 from ext.APM import DataError, QSqlAlignColorQueryModel
 from ext import APM
 from ext.Printing import ReportPrint
+import poloresurce
 
 
 
@@ -36,19 +37,24 @@ class AvailableHorses(QDialog):
         self.horseTable = QTableView()
         self.horseTable.verticalHeader().setVisible(False)
 
-        oKButton = QPushButton("OK")
+        oKButton = QPushButton(QIcon(":/Icons8/exit/closeman.png"),"Exit", self)
         oKButton.clicked.connect(self.widgetClose)
-        oKButton.setMaximumSize(50, 30)
+        oKButton.setMaximumSize(100, 30)
 
-        printButton = QPushButton('Print')
-        printButton.setMaximumSize(80,30)
+        printButton = QPushButton(QIcon(":/Icons8/print/print.png"), "Print", self)
+        printButton.setMaximumSize(100,30)
         printButton.clicked.connect(self.handlePrint)
 
-        previewButton = QPushButton('Preview')
-        previewButton.setMaximumSize(80,30)
+        previewButton = QPushButton(QIcon(":/Icons8/print/printpreview.png"), "Preview", self)
+        previewButton.setMaximumSize(100,30)
         previewButton.clicked.connect(self.handlePreview)
 
+        pdfButton = QPushButton(QIcon(":/Icons8/print/savepdf.png"), "Save PDF", self)
+        pdfButton.setMaximumSize(100, 30)
+        pdfButton.clicked.connect(self.handlePdf)
+
         buttonsLayout = QHBoxLayout()
+        buttonsLayout.addWidget(pdfButton)
         buttonsLayout.addWidget(printButton)
         buttonsLayout.addWidget(previewButton)
         buttonsLayout.addWidget(oKButton)
@@ -247,14 +253,16 @@ class AvailableHorses(QDialog):
             QMessageBox.warning(self,"DataError", err.message)
 
     def handlePrint(self):
-        rep = ReportPrint(self.horseTable,self.window.title(),self.centerColumns,
-                          self.printColumnWidths)
+        rep = ReportPrint(self.horseTable,self.window.title())
         rep.handlePrint()
 
     def handlePreview(self):
-        rep = ReportPrint(self.horseTable, self.windowTitle(), self.centerColumns,
-                          self.printColumnWidths)
+        rep = ReportPrint(self.horseTable, self.windowTitle())
         rep.handlePreview()
+
+    def handlePdf(self):
+        rep = ReportPrint(self.horseTable, self.windowTitle(),self.parent)
+        rep.handlePdf()
 
     def widgetClose(self):
         self.done(QDialog.Rejected)

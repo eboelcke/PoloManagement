@@ -1,10 +1,31 @@
 <RCC>
   <qresource prefix="Icons8/Accounts">
+    <file>PoloResource.qrc</file>
+    <file>index.png</file>
     <file>bill.png</file>
     <file>dollar.png</file>
+    <file>us_dollar.png</file>
+    <file>currency.png</file>
+    <file>pesos.png</file>
     <file>invoice.png</file>
     <file>ledger.png</file>
     <file>cash.png</file>
+  </qresource>
+  <qresource prefix="Icons8/logos">
+    <file>polo-right.png</file>
+  </qresource>
+  <qresource prefix="Icons8/Settings">
+    <file>settings.png</file>
+  </qresource>
+  <qresource prefix="Icons8/email">
+    <file>deleteMail.png</file>
+    <file>draftMail.png</file>
+    <file>openMail.png</file>
+    <file>send_clip.png</file>
+    <file>send_fileclip.png</file>
+    <file>send_pin.png</file>
+    <file>sendcolormail.png</file>
+    <file>send_mail.png</file>
   </qresource>
   <qresource prefix="Icons8/exit">
     <file>closeman.png</file>
@@ -12,6 +33,8 @@
     <file>closex.png</file>
   </qresource>
   <qresource prefix="Icons8/print">
+    <file>printpreview.png</file>
+    <file>savepdf.png</file>
     <file>filter.png</file>
     <file>print.png</file>
     <file>printtopdf.png</file>
@@ -29,6 +52,7 @@
     <file>downpayment.png</file>
   </qresource>
   <qresource prefix="Icons8/Agreement">
+    <file>viewdocument.png</file>
     <file>document.png</file>
     <file>Agreement.png</file>
   </qresource>

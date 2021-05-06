@@ -2,6 +2,7 @@ import sys
 from PyQt5.QtWidgets import (QDialog, QLabel, QSpinBox, QPushButton, QGridLayout, QApplication,
                              QMessageBox)
 from PyQt5.QtGui import QTextTableFormat
+from PyQt5.QtCore import Qt
 
 class Table(QDialog):
     def __init__(self, parent=None):
@@ -61,6 +62,7 @@ class Table(QDialog):
             fmt = QTextTableFormat()
             fmt.setCellPadding(padding)
             fmt.setCellSpacing(space)
+            fmt.setAlignment(Qt.AlignCenter)
             cursor.insertTable(rows, cols, fmt)
             self.close()
 
